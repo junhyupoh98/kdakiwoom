@@ -1,0 +1,23 @@
+{
+  "name": "stock-chatbot",
+  "version": "1.0.0",
+  "description": "주식 정보 챗봇",
+  "main": "backend/node/server.js",
+  "scripts": {
+    "start": "node backend/node/server.js",
+    "dev": "nodemon backend/node/server.js",
+    "python": "python backend/python/server.py"
+  },
+  "keywords": ["chatbot", "stock"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+

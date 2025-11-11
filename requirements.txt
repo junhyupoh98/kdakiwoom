@@ -1,0 +1,13 @@
+Flask==3.0.0
+flask-cors==4.0.0
+finance-datareader==0.9.96
+pandas>=2.0.0
+requests>=2.31.0
+deep-translator>=1.11.4
+openai>=1.0.0
+newspaper3k>=0.2.8
+lxml_html_clean>=0.1.0
+python-dotenv>=1.0.0
+google-auth>=2.23.0
+chromadb>=0.5.3
+

@@ -1,0 +1,758 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+:root {
+    --primary-light: #34d399;
+    --primary: #10b981;
+    --primary-dark: #047857;
+    --primary-gradient: linear-gradient(135deg, var(--primary-light) 0%, var(--primary-dark) 100%);
+    --primary-shadow: rgba(16, 185, 129, 0.3);
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Noto Sans KR', sans-serif;
+    background: var(--primary-gradient);
+    height: 100vh;
+    height: 100dvh; /* 동적 뷰포트 높이 */
+    padding: 0;
+    margin: 0;
+    position: fixed;
+    width: 100%;
+}
+
+.chat-container {
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    background: white;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+.chat-header {
+    background: var(--primary-gradient);
+    color: white;
+    padding: 15px 20px;
+    padding-top: max(15px, env(safe-area-inset-top));
+    text-align: center;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+}
+
+.chat-header h1 {
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.chat-messages {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: #f5f5f5;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0; /* flexbox 스크롤 문제 해결 */
+}
+
+.message {
+    margin-bottom: 15px;
+    display: flex;
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.user-message {
+    justify-content: flex-end;
+}
+
+.bot-message {
+    justify-content: flex-start;
+}
+
+.message-content {
+    max-width: 75%;
+    padding: 12px 16px;
+    border-radius: 18px;
+    word-wrap: break-word;
+    font-size: 15px;
+    line-height: 1.4;
+}
+
+.user-message .message-content {
+    background: var(--primary-gradient);
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+
+.bot-message .message-content {
+    background: white;
+    color: #333;
+    border-bottom-left-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+/* 주가 정보 스타일 */
+.stock-content {
+    padding: 0 !important;
+    max-width: 100% !important;
+}
+
+.stock-info {
+    padding: 15px;
+}
+
+.stock-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.stock-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    color: #333;
+}
+
+.stock-symbol {
+    font-size: 12px;
+    color: #888;
+    background: #f5f5f5;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.stock-price {
+    margin-bottom: 15px;
+}
+
+.stock-price .price {
+    font-size: 24px;
+    font-weight: 700;
+    color: #333;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.stock-price .change {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.stock-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.detail-item {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+}
+
+.detail-item span:first-child {
+    color: #888;
+}
+
+.detail-item span:last-child {
+    font-weight: 600;
+    color: #333;
+}
+
+.chart-container {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+    height: 200px;
+    position: relative;
+}
+
+.chart-container canvas {
+    max-height: 200px;
+}
+
+/* 주가 정보 액션 버튼 스타일 */
+.stock-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.action-btn {
+    flex: 1;
+    padding: 12px 16px;
+    background: var(--primary-gradient);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.action-btn:active {
+    transform: scale(0.98);
+    opacity: 0.9;
+}
+
+.action-btn:hover {
+    box-shadow: 0 4px 12px var(--primary-shadow);
+}
+
+.action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* 여러 종목 선택 버튼 스타일 */
+.stock-selection-content {
+    padding: 15px !important;
+}
+
+.stock-selection-title {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+
+.stock-selection-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stock-selection-btn {
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--primary-gradient);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s;
+    text-align: left;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.stock-selection-btn:active {
+    transform: scale(0.98);
+    opacity: 0.9;
+}
+
+.stock-selection-btn:hover {
+    box-shadow: 0 4px 12px var(--primary-shadow);
+}
+
+.stock-selection-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* 재무제표 섹션 스타일 */
+.financial-section {
+    padding: 15px;
+}
+
+.financial-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin: 0 0 15px 0;
+}
+
+.financial-chart-container {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+    height: 280px;
+    position: relative;
+    padding-bottom: 40px;
+}
+
+.financial-chart-container canvas {
+    max-height: 240px;
+}
+
+/* Chart.js 범례 스타일 커스터마이징 */
+.financial-chart-container .chartjs-legend {
+    margin-top: 10px;
+    padding-top: 15px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.financial-chart-container .chartjs-legend ul {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 20px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.financial-chart-container .chartjs-legend li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.financial-chart-container .chartjs-legend li:hover {
+    opacity: 0.7;
+}
+
+.financial-chart-container .chartjs-legend li span {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+.financial-summary {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.financial-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.financial-label {
+    font-size: 14px;
+    color: #666;
+    font-weight: 500;
+}
+
+.financial-value {
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+}
+
+.financial-year {
+    text-align: center;
+    font-size: 12px;
+    color: #888;
+    margin-top: 5px;
+}
+
+/* 세그먼트 섹션 스타일 */
+.segment-section {
+    margin-top: 25px;
+    padding-top: 20px;
+    border-top: 2px solid #e0e0e0;
+}
+
+.segment-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+    margin: 0 0 15px 0;
+}
+
+.segment-chart-container {
+    position: relative;
+    height: 300px;
+    margin-bottom: 10px;
+}
+
+.segment-chart-container canvas {
+    max-height: 300px;
+}
+
+.segment-date {
+    text-align: center;
+    font-size: 12px;
+    color: #888;
+    margin-top: 8px;
+}
+
+/* 뉴스 섹션 스타일 */
+.news-section {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.news-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin: 0 0 12px 0;
+}
+
+.news-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 8px;
+    margin-right: -8px;
+}
+
+/* 뉴스 리스트 스크롤바 스타일링 */
+.news-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.news-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.news-list::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 10px;
+}
+
+.news-list::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+.news-item {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 12px;
+    border-left: 3px solid var(--primary);
+}
+
+.news-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: #888;
+}
+
+.news-site {
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.news-date {
+    color: #aaa;
+}
+
+.news-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.news-link {
+    color: #333;
+    text-decoration: none;
+    font-size: 14px;
+    line-height: 1.4;
+    display: block;
+}
+
+.news-link:hover {
+    color: var(--primary-dark);
+    text-decoration: underline;
+}
+
+.news-link strong {
+    font-weight: 600;
+}
+
+.news-summary {
+    font-size: 12px;
+    color: #666;
+    line-height: 1.5;
+    margin: 0;
+    padding-left: 8px;
+    border-left: 2px solid #e0e0e0;
+}
+
+.chat-input-container {
+    display: flex;
+    padding: 12px 15px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    background: white;
+    border-top: 1px solid #e0e0e0;
+    gap: 10px;
+    flex-shrink: 0;
+    align-items: center;
+}
+
+#userInput {
+    flex: 1;
+    padding: 14px 18px;
+    border: 2px solid #e0e0e0;
+    border-radius: 25px;
+    outline: none;
+    font-size: 16px; /* iOS 줌 방지 */
+    transition: border-color 0.3s;
+    background: #f8f8f8;
+    -webkit-appearance: none;
+}
+
+#userInput:focus {
+    border-color: var(--primary);
+    background: white;
+}
+
+#sendButton {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    background: var(--primary-gradient);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, opacity 0.2s;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#sendButton:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+}
+
+#sendButton svg {
+    width: 20px;
+    height: 20px;
+}
+
+#imageUploadButton {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    border-radius: 50%;
+    border: 1px solid #d9d9d9;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0f172a;
+    cursor: pointer;
+    transition: transform 0.2s, background-color 0.2s, box-shadow 0.2s;
+    touch-action: manipulation;
+}
+
+#imageUploadButton:hover {
+    background: #f4f4f5;
+}
+
+#imageUploadButton:active {
+    transform: scale(0.95);
+}
+
+#imageUploadButton svg {
+    width: 20px;
+    height: 20px;
+}
+
+.image-preview {
+    max-width: 220px;
+    border-radius: 14px;
+    display: block;
+}
+
+.vision-result {
+    padding: 18px;
+    background: #ffffff;
+    border-radius: 18px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+    max-width: 100%;
+}
+
+.vision-result h4 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 14px;
+    color: #0f172a;
+}
+
+.vision-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.vision-field {
+    padding: 12px;
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.vision-field span {
+    display: block;
+}
+
+.vision-field .label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.vision-field .value {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
+    word-break: break-word;
+}
+
+.vision-model {
+    font-size: 12px;
+    color: #475569;
+    margin-bottom: 10px;
+}
+
+.vision-summary-block,
+.vision-json-block {
+    margin-top: 14px;
+}
+
+.vision-summary-block h5,
+.vision-json-block h5 {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #1e293b;
+}
+
+.vision-summary {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px;
+    font-size: 13px;
+    color: #1e293b;
+    white-space: pre-line;
+    line-height: 1.5;
+}
+
+.vision-json {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 12px;
+    padding: 12px;
+.financial-toggle {
+    display: inline-flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.financial-toggle .toggle-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid #d1d5db;
+    background: #ffffff;
+    font-size: 13px;
+    color: #1f2937;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.financial-toggle .toggle-btn.active {
+    background: var(--primary-gradient);
+    color: #ffffff;
+    border-color: transparent;
+}
+
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.45;
+}
+
+.vision-fallback-note {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #f97316;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 스크롤바 스타일링 (모바일에서는 숨김) */
+.chat-messages::-webkit-scrollbar {
+    width: 4px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+}
+
+/* 모바일 터치 최적화 */
+@media (max-width: 768px) {
+    .message-content {
+        font-size: 15px;
+    }
+    
+    #userInput {
+        font-size: 16px; /* iOS 줌 방지 */
+    }
+}
+

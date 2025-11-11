@@ -1,0 +1,30 @@
+# 서비스 계정 키 파일 (보안상 중요!)
+*.json
+!package.json
+service-account-key.json
+
+# 환경 변수 파일
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

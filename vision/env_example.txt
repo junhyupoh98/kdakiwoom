@@ -1,0 +1,10 @@
+# Google Cloud Vision 설정
+# Google Cloud Console에서 서비스 계정 키를 다운로드한 후 아래 경로를 설정하세요
+
+# 방법 1: .env 파일에 경로 설정
+GOOGLE_APPLICATION_CREDENTIALS=./service-account-key.json
+
+# 방법 2: 환경 변수로 직접 설정 (선택사항)
+# Windows PowerShell: $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\key.json"
+# Windows CMD: set GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\key.json
+# Linux/Mac: export GOOGLE_APPLICATION_CREDENTIALS="./service-account-key.json"
