@@ -23,12 +23,17 @@ US_NEWS_COLLECTION = os.getenv(
     "CHROMADB_US_NEWS_COLLECTION",
     "USnews_summary_ko",
 )
+KR_NEWS_COLLECTION = os.getenv(
+    "CHROMADB_KR_NEWS_COLLECTION",
+    "KRnews_summary_ko",
+)
 
-US_FIN_COLLECTION = os.getenv("CHROMADB_US_FIN_COLLECTION", "USfund_charts")
+US_FIN_COLLECTION = os.getenv("CHROMADB_US_FIN_COLLECTION", "USfund_financials")
 KR_FIN_COLLECTION = os.getenv("CHROMADB_KR_FIN_COLLECTION", "KRfund_financials")
 
 _client: Optional[ClientAPI] = None
 _us_news_collection: Optional[Collection] = None
+_kr_news_collection: Optional[Collection] = None
 _us_fin_collection: Optional[Collection] = None
 _kr_fin_collection: Optional[Collection] = None
 
@@ -62,12 +67,58 @@ def get_us_news_collection() -> Collection:
     return _us_news_collection
 
 
+def get_kr_news_collection() -> Collection:
+    """한국 주식 뉴스 요약이 저장된 컬렉션 핸들 반환"""
+    global _kr_news_collection
+    if _kr_news_collection is None:
+        client = get_chroma_client()
+        _kr_news_collection = client.get_collection(KR_NEWS_COLLECTION)
+    return _kr_news_collection
+
+
 def get_us_fin_collection() -> Collection:
     """미국 주식 재무 데이터가 저장된 컬렉션 핸들 반환"""
     global _us_fin_collection
     if _us_fin_collection is None:
         client = get_chroma_client()
-        _us_fin_collection = client.get_collection(US_FIN_COLLECTION)
+        try:
+            # 기본 컬렉션 이름으로 시도
+            _us_fin_collection = client.get_collection(US_FIN_COLLECTION)
+            print(f"[DEBUG] US financial collection loaded: {US_FIN_COLLECTION}")
+        except Exception as exc:
+            print(f"[WARN] Failed to load US financial collection '{US_FIN_COLLECTION}': {exc}")
+            # 사용 가능한 컬렉션 목록 확인하여 자동으로 찾기
+            try:
+                collections = client.list_collections()
+                collection_names = [c.name for c in collections]
+                print(f"[DEBUG] Available collections: {collection_names}")
+                
+                # US로 시작하는 financial 관련 컬렉션 찾기
+                us_fin_collections = [
+                    name for name in collection_names 
+                    if 'US' in name and ('fund' in name.lower() or 'fin' in name.lower())
+                ]
+                print(f"[DEBUG] US financial-related collections: {us_fin_collections}")
+                
+                if us_fin_collections:
+                    # 우선순위: USfund_financials > USfund_charts > 기타
+                    priority_names = ["USfund_financials", "USfund_charts"]
+                    for priority_name in priority_names:
+                        if priority_name in us_fin_collections:
+                            print(f"[INFO] Using collection: {priority_name}")
+                            _us_fin_collection = client.get_collection(priority_name)
+                            break
+                    else:
+                        # 우선순위 컬렉션이 없으면 첫 번째로 찾은 컬렉션 사용
+                        collection_name = us_fin_collections[0]
+                        print(f"[INFO] Using first available collection: {collection_name}")
+                        _us_fin_collection = client.get_collection(collection_name)
+                else:
+                    print(f"[ERROR] No US financial collection found in available collections")
+                    raise exc
+            except Exception as e2:
+                print(f"[ERROR] Could not find any US financial collection: {e2}")
+                raise exc
     return _us_fin_collection
 
 
@@ -139,6 +190,81 @@ def fetch_us_stock_news(symbol: str, limit: int = 3) -> List[Dict[str, Any]]:
             item.get("date_int"),
             item.get("published_at"),
             item.get("raw_metadata", {}).get("date"),
+        ),
+        reverse=True,
+    )
+
+    return news_items[:limit]
+
+
+def fetch_kr_stock_news(symbol: str, limit: int = 3) -> List[Dict[str, Any]]:
+    """
+    종목별 한국 주식 뉴스 요약 리스트 반환.
+
+    Args:
+        symbol: 조회할 티커(6자리 숫자, 예: 403550). .KS, .KQ 제거된 형태.
+        limit: 최대 반환 개수.
+
+    Returns:
+        title/summary/url 등의 정보를 담은 dict 리스트.
+    """
+    if not symbol:
+        return []
+
+    # 심볼 정리 (.KS, .KQ 제거, 숫자만)
+    clean_symbol = symbol.replace('.KS', '').replace('.KQ', '').strip()
+    if not clean_symbol.isdigit() or len(clean_symbol) != 6:
+        return []
+
+    try:
+        collection = get_kr_news_collection()
+    except Exception as exc:
+        print(f"[DEBUG] KR Chroma news collection init error: {exc}")
+        return []
+
+    # ticker6로 필터링 (6자리 티커)
+    where_filter = {"ticker6": clean_symbol}
+
+    # 충분한 개수를 가져와 날짜 기준으로 최신순 정렬
+    fetch_limit = max(limit * 3, limit)
+    try:
+        result = collection.get(where=where_filter, limit=fetch_limit)
+    except Exception as exc:
+        print(f"[DEBUG] KR Chroma news get() error: {exc}")
+        return []
+
+    documents = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+    ids = result.get("ids") or []
+
+    print(f"[DEBUG] KR Chroma news documents sample: {documents[:1] if documents else '[]'}")
+    print(f"[DEBUG] KR Chroma news metadatas sample: {metadatas[:1] if metadatas else '[]'}")
+
+    news_items: List[Dict[str, Any]] = []
+    for idx, doc in enumerate(documents):
+        metadata = metadatas[idx] if idx < len(metadatas) else {}
+        news_items.append(
+            {
+                "id": ids[idx] if idx < len(ids) else None,
+                "ticker": metadata.get("ticker6") or metadata.get("ticker_full"),
+                "title": metadata.get("title"),
+                "summary": doc,
+                "url": metadata.get("url"),
+                "published_at": metadata.get("date") or metadata.get("published_at"),
+                "source": metadata.get("source") or metadata.get("site"),
+                "date": metadata.get("date"),
+                "date_int": metadata.get("date_int"),
+                "company": metadata.get("company"),
+                "raw_metadata": metadata,
+            }
+        )
+
+    # 날짜 기준으로 정렬 (date_int > date > published_at)
+    news_items.sort(
+        key=lambda item: (
+            item.get("date_int") or 0,
+            item.get("date") or "",
+            item.get("published_at") or "",
         ),
         reverse=True,
     )
@@ -286,120 +412,177 @@ def _parse_financial_document(document: Any) -> Optional[Dict[str, Any]]:
 def fetch_us_financials_from_chroma(symbol: str) -> Optional[Dict[str, Any]]:
     """
     미국 주식 재무 데이터를 Chroma에서 조회하여 프론트에서 사용하는 형식으로 변환
+    새로운 형식: Document에 y4(연도별), q4(분기별) 배열이 포함된 JSON
     """
     if not symbol:
         return None
 
-    print("[DEBUG] Chroma fetch start:", symbol)
+    print(f"[DEBUG] US Chroma fetch start: {symbol} (collection: {US_FIN_COLLECTION})")
 
     try:
         collection = get_us_fin_collection()
     except Exception as exc:
-        print("[DEBUG] Chroma client init error:", exc)
+        print(f"[ERROR] US Chroma client init error: {exc}")
         return None
 
     try:
         result = collection.get(
             where={"symbol": symbol.upper()},
-            limit=5,
+            limit=1,
             include=["metadatas", "documents"],
         )
-        print("[DEBUG] Chroma raw result:", result)
+        print(f"[DEBUG] US Chroma query result: {len(result.get('documents', []))} documents found")
     except Exception as exc:
-        print("[DEBUG] Chroma get() error:", exc)
+        print(f"[ERROR] US Chroma get() error: {exc}")
         return None
 
     documents = result.get("documents") or []
     metadatas = result.get("metadatas") or []
-
-    print("[DEBUG] Chroma financial documents sample:", documents[:1])
-    print("[DEBUG] Chroma financial metadatas sample:", metadatas[:1])
-
-    quarter_doc = None
-    quarter_meta = None
-    annual_doc = None
-    annual_meta = None
-    segment_meta = None
-
-    for idx, document in enumerate(documents):
-        metadata = metadatas[idx] if idx < len(metadatas) else {}
-        kind = (metadata or {}).get("kind")
-        if kind == "qbars_quarter":
-            quarter_doc = document
-            quarter_meta = metadata or {}
-        elif kind == "ybars_annual":
-            annual_doc = document
-            annual_meta = metadata or {}
-        elif kind == "seg_q":
-            segment_meta = metadata or {}
-
-    if not quarter_doc and not annual_doc:
-        print("[DEBUG] Chroma financial docs missing:", symbol)
+    if not documents:
+        print(f"[DEBUG] US Chroma financial docs missing: {symbol}")
         return None
 
-    def parse_values(text: str, suffix: str) -> Dict[str, float]:
-        patterns = {
-            "revenue": rf"매출\s([\d\.,]+){suffix}",
-            "operatingIncome": rf"영업(?:이익)?\s([\d\.,]+){suffix}",
-            "netIncome": rf"순(?:이익)?\s([\d\.,]+){suffix}",
-        }
-        values: Dict[str, float] = {}
-        for key, pattern in patterns.items():
-            match = re.search(pattern, text)
-            if match:
-                raw = match.group(1).replace(",", "")
-                try:
-                    values[key] = float(raw)
-                except ValueError:
-                    values[key] = 0.0
-            else:
-                values[key] = 0.0
-        return values
+    raw_doc = documents[0]
+    metadata = metadatas[0] if metadatas else {}
 
-    def in_billions_to_amount(values: Dict[str, float]) -> Dict[str, float]:
-        return {k: v * 1_000_000_000.0 for k, v in values.items()}
+    try:
+        payload = json.loads(raw_doc) if isinstance(raw_doc, str) else raw_doc
+    except (json.JSONDecodeError, TypeError) as e:
+        print(f"[ERROR] US Chroma JSON parse error: {e}")
+        print(f"[DEBUG] Raw document type: {type(raw_doc)}, sample: {str(raw_doc)[:200]}")
+        return None
 
-    chart_rows: List[Dict[str, Any]] = []
-    revenue_series: List[Dict[str, Any]] = []
-    net_income_series: List[Dict[str, Any]] = []
-    operating_series: List[Dict[str, Any]] = []
-    latest_entry: Dict[str, Any] = {}
+    if not isinstance(payload, dict):
+        print(f"[ERROR] US Chroma payload is not a dict: {type(payload)}")
+        return None
 
-    if quarter_doc:
-        quarter_vals = in_billions_to_amount(parse_values(str(quarter_doc), "B"))
-        as_of = (quarter_meta or {}).get("as_of") or (quarter_meta or {}).get("date") or "Recent Quarter"
-        row = {
-            "year": as_of,
-            "revenue": quarter_vals.get("revenue", 0.0),
-            "operatingIncome": quarter_vals.get("operatingIncome", 0.0),
-            "netIncome": quarter_vals.get("netIncome", 0.0),
-        }
-        chart_rows.append(row)
-        revenue_series.append({"year": as_of, "value": row["revenue"]})
-        net_income_series.append({"year": as_of, "value": row["netIncome"]})
-        operating_series.append({"year": as_of, "value": row["operatingIncome"]})
-        latest_entry = row
+    print(f"[DEBUG] US Chroma payload keys: {list(payload.keys())}")
+    print(f"[DEBUG] US Chroma payload has y4: {bool(payload.get('y4'))}, q4: {bool(payload.get('q4'))}")
 
-    if annual_doc:
-        annual_vals = in_billions_to_amount(parse_values(str(annual_doc), "B"))
-        as_of = (annual_meta or {}).get("as_of") or (annual_meta or {}).get("date") or "Recent Year"
-        row = {
-            "year": as_of,
-            "revenue": annual_vals.get("revenue", 0.0),
-            "operatingIncome": annual_vals.get("operatingIncome", 0.0),
-            "netIncome": annual_vals.get("netIncome", 0.0),
-        }
-        chart_rows.append(row)
-        revenue_series.append({"year": as_of, "value": row["revenue"]})
-        net_income_series.append({"year": as_of, "value": row["netIncome"]})
-        operating_series.append({"year": as_of, "value": row["operatingIncome"]})
-        if not latest_entry:
-            latest_entry = row
+    # Helper to parse numeric values (USD는 이미 올바른 단위)
+    def parse_value(value: Any) -> float:
+        if value is None:
+            return 0.0
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
 
-    chart_rows.sort(key=lambda item: item["year"])
-    revenue_series.sort(key=lambda item: item["year"])
-    net_income_series.sort(key=lambda item: item["year"])
-    operating_series.sort(key=lambda item: item["year"])
+    def quarter_key(label: str) -> Tuple[int, int]:
+        """분기 문자열을 정렬 가능한 튜플로 변환 (예: "2025Q3" -> (2025, 3))"""
+        match = re.match(r"(\d{4})Q(\d)", str(label))
+        if match:
+            return int(match.group(1)), int(match.group(2))
+        return (0, 0)
+
+    # 분기별 데이터 처리
+    quarter_rows: List[Dict[str, Any]] = []
+    quarter_revenue: List[Dict[str, Any]] = []
+    quarter_net_income: List[Dict[str, Any]] = []
+    quarter_operating: List[Dict[str, Any]] = []
+    quarters = payload.get("q4") or []
+    print(f"[DEBUG] Processing {len(quarters)} quarters")
+    for idx, item in enumerate(quarters):
+        if not isinstance(item, dict):
+            print(f"[WARN] Quarter item {idx} is not a dict: {type(item)}")
+            continue
+        
+        # 분기 레이블: "분기" 필드 직접 사용 (예: "2025Q3")
+        label = item.get("분기") or ""
+        if not label:
+            print(f"[WARN] Quarter item {idx} missing '분기' field: {item}")
+            continue
+        
+        # 재무 데이터 추출 (한국어 필드명 사용)
+        revenue = parse_value(item.get("매출액"))
+        operating = parse_value(item.get("영업이익"))
+        net_income = parse_value(item.get("당기순이익"))
+        
+        if revenue == 0.0 and operating == 0.0 and net_income == 0.0:
+            print(f"[WARN] Quarter {label} has all zero values, skipping")
+            continue
+        
+        print(f"[DEBUG] Quarter {label}: revenue={revenue}, operating={operating}, net_income={net_income}")
+        
+        quarter_rows.append(
+            {
+                "year": label,
+                "revenue": revenue,
+                "operatingIncome": operating,
+                "netIncome": net_income,
+            }
+        )
+        quarter_revenue.append({"year": label, "value": revenue})
+        quarter_net_income.append({"year": label, "value": net_income})
+        quarter_operating.append({"year": label, "value": operating})
+
+    quarter_rows.sort(key=lambda row: quarter_key(row["year"]))
+    quarter_revenue.sort(key=lambda row: quarter_key(row["year"]))
+    quarter_net_income.sort(key=lambda row: quarter_key(row["year"]))
+    quarter_operating.sort(key=lambda row: quarter_key(row["year"]))
+
+    # 연도별 데이터 처리
+    year_rows: List[Dict[str, Any]] = []
+    year_revenue: List[Dict[str, Any]] = []
+    year_net_income: List[Dict[str, Any]] = []
+    year_operating: List[Dict[str, Any]] = []
+    years = payload.get("y4") or []
+    print(f"[DEBUG] Processing {len(years)} years")
+    for idx, item in enumerate(years):
+        if not isinstance(item, dict):
+            print(f"[WARN] Year item {idx} is not a dict: {type(item)}")
+            continue
+        
+        # 연도 레이블: "연도" 필드 직접 사용 (예: 2024 -> "2024")
+        year_value = item.get("연도")
+        if year_value is None:
+            print(f"[WARN] Year item {idx} missing '연도' field: {item}")
+            continue
+        
+        label = str(year_value)
+        
+        # 재무 데이터 추출 (한국어 필드명 사용)
+        revenue = parse_value(item.get("매출액"))
+        operating = parse_value(item.get("영업이익"))
+        net_income = parse_value(item.get("당기순이익"))
+        
+        if revenue == 0.0 and operating == 0.0 and net_income == 0.0:
+            print(f"[WARN] Year {label} has all zero values, skipping")
+            continue
+        
+        print(f"[DEBUG] Year {label}: revenue={revenue}, operating={operating}, net_income={net_income}")
+        
+        year_rows.append(
+            {
+                "year": label,
+                "revenue": revenue,
+                "operatingIncome": operating,
+                "netIncome": net_income,
+            }
+        )
+        year_revenue.append({"year": label, "value": revenue})
+        year_net_income.append({"year": label, "value": net_income})
+        year_operating.append({"year": label, "value": operating})
+
+    year_rows.sort(key=lambda row: row["year"])
+    year_revenue.sort(key=lambda row: row["year"])
+    year_net_income.sort(key=lambda row: row["year"])
+    year_operating.sort(key=lambda row: row["year"])
+
+    # 데이터가 없으면 None 반환
+    if not quarter_rows and not year_rows:
+        print(f"[WARN] No financial data found for {symbol}")
+        return None
+
+    # 분기와 연도 데이터 합치기
+    chart_rows = quarter_rows + year_rows
+    revenue_series = quarter_revenue + year_revenue
+    net_income_series = quarter_net_income + year_net_income
+    operating_series = quarter_operating + year_operating
+
+    # 최신 데이터 찾기 (분기 우선, 없으면 연도)
+    latest_entry = quarter_rows[-1] if quarter_rows else (year_rows[-1] if year_rows else {})
+    print(f"[DEBUG] Latest entry: {latest_entry}")
 
     response: Dict[str, Any] = {
         "revenue": revenue_series,
@@ -414,43 +597,49 @@ def fetch_us_financials_from_chroma(symbol: str) -> Optional[Dict[str, Any]]:
         },
     }
 
-    currency = (quarter_meta or {}).get("currency") or (annual_meta or {}).get("currency")
-    if currency:
-        response["currency"] = currency
-    as_of = (quarter_meta or {}).get("as_of") or (annual_meta or {}).get("as_of")
+    # 통화 정보
+    currency = payload.get("currency") or metadata.get("currency") or "USD"
+    response["currency"] = currency
+
+    # 데이터 기준일
+    as_of = payload.get("as_of") or metadata.get("as_of")
     if as_of:
         response["asOf"] = as_of
 
-    source_meta = quarter_meta or annual_meta or {}
-    if source_meta:
-        response["source"] = {
-            "collection": US_FIN_COLLECTION,
-            "doc_id": source_meta.get("doc_id"),
-        }
+    # 출처 정보
+    source = payload.get("source") or metadata.get("source")
+    response["source"] = {
+        "collection": US_FIN_COLLECTION,
+        "doc_id": metadata.get("doc_id"),
+        "source": source,
+    }
 
-    if segment_meta and segment_meta.get("segments"):
-        try:
-            raw_segments = json.loads(segment_meta["segments"])
-        except json.JSONDecodeError:
-            raw_segments = None
-        if isinstance(raw_segments, dict):
-            total = sum(float(v) for v in raw_segments.values() if isinstance(v, (int, float)))
-            segments_list = []
-            for name, value in raw_segments.items():
-                try:
-                    amount = float(value)
-                except (TypeError, ValueError):
-                    continue
-                percentage = (amount / total * 100.0) if total else 0.0
-                segments_list.append(
-                    {
-                        "segment": name,
-                        "revenue": amount,
-                        "percentage": percentage,
-                    }
-                )
-            segments_list.sort(key=lambda item: item["revenue"], reverse=True)
-            response["segments"] = segments_list
+    # 세그먼트 정보 처리
+    segments_pct = payload.get("segments_pct")
+    segments_asof = payload.get("segments_asof")
+    if segments_pct and isinstance(segments_pct, dict):
+        segments_list = []
+        # 최신 분기 또는 연도의 매출액을 사용하여 세그먼트별 매출액 계산
+        total_revenue = latest_entry.get("revenue", 0.0)
+        for name, percentage in segments_pct.items():
+            percentage_value = float(percentage) if percentage else 0.0
+            segment_revenue = (total_revenue * percentage_value / 100.0) if total_revenue > 0 else 0.0
+            segments_list.append(
+                {
+                    "segment": name,
+                    "revenue": segment_revenue,
+                    "percentage": percentage_value,
+                }
+            )
+        segments_list.sort(key=lambda item: item["percentage"], reverse=True)
+        response["segments"] = segments_list
+        response["segmentCurrency"] = currency
+        if segments_asof:
+            response["segmentDate"] = segments_asof
+        else:
+            # segments_asof가 없으면 as_of 사용
+            if as_of:
+                response["segmentDate"] = as_of
 
     return response
 
@@ -624,7 +813,9 @@ def fetch_kr_financials_from_chroma(symbol: str) -> Optional[Dict[str, Any]]:
 
 __all__ = [
     "fetch_us_stock_news",
+    "fetch_kr_stock_news",
     "get_us_news_collection",
+    "get_kr_news_collection",
     "get_chroma_client",
     "fetch_us_financials_from_chroma",
     "fetch_kr_financials_from_chroma",

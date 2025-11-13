@@ -20,12 +20,14 @@ from dotenv import load_dotenv
 try:
     from .chroma_client import (
         fetch_us_stock_news,
+        fetch_kr_stock_news,
         fetch_us_financials_from_chroma,
         fetch_kr_financials_from_chroma,
     )
 except ImportError:
     from chroma_client import (  # type: ignore
         fetch_us_stock_news,
+        fetch_kr_stock_news,
         fetch_us_financials_from_chroma,
         fetch_kr_financials_from_chroma,
     )
@@ -293,6 +295,8 @@ def get_stock_chart(symbol):
         # 기간 설정
         if period == '1m':
             start_date = datetime.now() - timedelta(days=30)
+        elif period == '3m':
+            start_date = datetime.now() - timedelta(days=90)
         elif period == '6m':
             start_date = datetime.now() - timedelta(days=180)
         elif period == '1y':
@@ -809,15 +813,27 @@ def get_stock_news_api(symbol):
             print(f"[INFO] Chroma에서 {len(news_from_chroma)}개 뉴스 가져옴 ({clean_symbol})")
             response_items = []
             for item in news_from_chroma:
+                # 날짜 필드: date > published_at > date_int 변환
+                date_str = item.get('date') or item.get('published_at') or ''
+                if not date_str and item.get('date_int'):
+                    # date_int를 날짜 문자열로 변환 (예: 20251024 -> 2025-10-24)
+                    try:
+                        date_int_str = str(item.get('date_int'))
+                        if len(date_int_str) == 8:
+                            date_str = f"{date_int_str[:4]}-{date_int_str[4:6]}-{date_int_str[6:8]}"
+                    except:
+                        pass
+                
                 response_items.append(
                     {
                         'title': item.get('title') or '',
                         'summary': item.get('summary') or '',
                         'url': item.get('url') or '',
-                        'date': item.get('published_at') or '',
-                        'site': item.get('source') or '',
+                        'date': date_str,
+                        'site': item.get('source') or item.get('site') or '',
                     }
                 )
+            print(f"[DEBUG] US news response items: {len(response_items)}개")
             return jsonify({'news': response_items})
 
         # 폴백: 기존 FMP 로직
@@ -889,13 +905,35 @@ def get_stock_news_api(symbol):
 # 한국 주식 뉴스 API 엔드포인트
 @app.route('/api/kr-stock/<symbol>/news', methods=['GET'])
 def get_kr_stock_news(symbol):
-    """한국 주식 뉴스 조회 API (네이버 뉴스 우선, FMP 폴백)"""
+    """한국 주식 뉴스 조회 API (ChromaDB 우선, 네이버 뉴스 폴백, FMP 폴백)"""
     try:
         # 심볼 정리 (.KS 제거)
         clean_symbol = symbol.replace('.KS', '').replace('.KQ', '')
         
         if not clean_symbol.isdigit() or len(clean_symbol) != 6:
             return jsonify({'error': '올바른 심볼 코드가 아닙니다.'}), 400
+        
+        # ChromaDB에서 미리 정리된 뉴스 우선 조회
+        news_from_chroma = []
+        try:
+            news_from_chroma = fetch_kr_stock_news(clean_symbol, limit=10)
+        except Exception as chroma_error:
+            print(f"[WARN] Chroma 뉴스 조회 실패 (KR): {chroma_error}")
+        
+        if news_from_chroma:
+            print(f"[INFO] Chroma에서 {len(news_from_chroma)}개 뉴스 가져옴 (KR: {clean_symbol})")
+            response_items = []
+            for item in news_from_chroma:
+                response_items.append(
+                    {
+                        'title': item.get('title') or '',
+                        'summary': item.get('summary') or '',
+                        'url': item.get('url') or '',
+                        'date': item.get('date') or item.get('published_at') or '',
+                        'site': item.get('source') or '',
+                    }
+                )
+            return jsonify({'news': response_items})
         
         # 회사명 가져오기 (캐시 사용)
         krx_list = get_krx_list_cached()

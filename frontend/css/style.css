@@ -239,6 +239,54 @@ body {
     transform: none;
 }
 
+/* 재무 질문 버튼 스타일 */
+.financial-question-buttons {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.financial-question-btn {
+    width: 100%;
+    padding: 14px 18px;
+    background: #ffffff;
+    color: #333;
+    border: 1.5px solid #e5e5e5;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+    line-height: 1.5;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    position: relative;
+}
+
+.financial-question-btn:hover {
+    background: #fafafa;
+    border-color: #d5d5d5;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.financial-question-btn:active {
+    background: #f5f5f5;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.financial-question-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* 질문 버튼 내 키워드 스타일 */
+.financial-question-btn .question-keyword {
+    color: #667eea;
+    font-weight: 600;
+}
+
 /* 여러 종목 선택 버튼 스타일 */
 .stock-selection-content {
     padding: 15px !important;
@@ -313,6 +361,67 @@ body {
     max-height: 240px;
 }
 
+/* 차트 슬라이더 스타일 */
+.financial-chart-slider {
+    margin-top: 15px;
+}
+
+.chart-slider-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.chart-slider-tab {
+    padding: 10px 20px;
+    background: transparent;
+    color: #666;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: -2px;
+}
+
+.chart-slider-tab:hover {
+    color: #333;
+}
+
+.chart-slider-tab.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
+    font-weight: 600;
+}
+
+.chart-slider-container {
+    position: relative;
+    min-height: 350px;
+}
+
+.chart-slide {
+    display: none;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.chart-slide.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+
 /* Chart.js 범례 스타일 커스터마이징 */
 .financial-chart-container .chartjs-legend {
     margin-top: 10px;
@@ -353,7 +462,6 @@ body {
 .financial-summary {
     margin-top: 15px;
     padding-top: 15px;
-    border-top: 1px solid #e0e0e0;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -381,10 +489,102 @@ body {
 }
 
 .financial-year {
-    text-align: center;
-    font-size: 12px;
-    color: #888;
-    margin-top: 5px;
+    text-align: left;
+    font-size: 14px;
+    color: #666;
+    margin-top: 20px;
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+
+/* 재무 상세 카드 스타일 */
+.financial-detail-card {
+    background: linear-gradient(135deg, #f5e6ff 0%, #e9d5ff 100%);
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 15px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.financial-detail-header {
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.financial-detail-mini-chart {
+    width: 120px;
+    height: 60px;
+    flex-shrink: 0;
+}
+
+.financial-detail-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0;
+}
+
+.financial-detail-summary {
+    font-size: 16px;
+    color: #555;
+    margin-bottom: 20px;
+    line-height: 1.6;
+}
+
+.financial-detail-question {
+    font-size: 15px;
+    font-weight: 600;
+    color: #444;
+    margin-bottom: 12px;
+}
+
+.financial-detail-reasons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-left: 8px;
+}
+
+.financial-detail-reason-item {
+    font-size: 14px;
+    color: #555;
+    line-height: 1.6;
+}
+
+.financial-detail-more {
+    font-size: 15px;
+    color: #555;
+    margin-bottom: 12px;
+    margin-top: 8px;
+}
+
+.financial-detail-btn {
+    width: 100%;
+    padding: 14px 20px;
+    background: #ffffff;
+    color: #333;
+    border: 1.5px solid #d0d0d0;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.financial-detail-btn:hover {
+    background: #f8f9fa;
+    border-color: #b8b8b8;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+    transform: translateY(-1px);
+}
+
+.financial-detail-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 /* 세그먼트 섹션 스타일 */
@@ -416,6 +616,22 @@ body {
     font-size: 12px;
     color: #888;
     margin-top: 8px;
+}
+
+/* 차트 슬라이더 내 세그먼트 차트 스타일 조정 */
+.chart-slide .segment-chart-container {
+    height: 350px;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.chart-slide .segment-chart-container canvas {
+    max-height: 350px;
+}
+
+.chart-slide .segment-date {
+    margin-top: 10px;
 }
 
 /* 뉴스 섹션 스타일 */
@@ -667,6 +883,92 @@ body {
 .vision-summary-block,
 .vision-json-block {
     margin-top: 14px;
+}
+
+/* 보강 정보 섹션 스타일 */
+.vision-enrichment-section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 2px solid #e2e8f0;
+}
+
+.vision-enrichment-section h5 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: #0f172a;
+}
+
+.vision-sources {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #f1f5f9;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #475569;
+}
+
+/* 밸류체인 스타일 */
+.value-chain-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.value-chain-item {
+    padding: 14px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+}
+
+.value-chain-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.value-chain-header strong {
+    font-size: 14px;
+    color: #0f172a;
+}
+
+.confidence-badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    background: #dbeafe;
+    color: #1e40af;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+/* 관련 상장사 스타일 */
+.related-companies-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.related-company-item {
+    padding: 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.related-company-item strong {
+    font-size: 14px;
+    color: #0f172a;
+}
+
+.company-info {
+    font-size: 12px;
+    color: #64748b;
+    font-weight: 500;
 }
 
 .vision-summary-block h5,

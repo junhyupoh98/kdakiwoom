@@ -292,6 +292,9 @@ app.get('/api/stock/:query/chart', async (req, res) => {
       case '1m':
         period1 = now - (30 * 24 * 60 * 60);
         break;
+      case '3m':
+        period1 = now - (90 * 24 * 60 * 60);
+        break;
       case '6m':
         period1 = now - (180 * 24 * 60 * 60);
         break;
@@ -311,7 +314,7 @@ app.get('/api/stock/:query/chart', async (req, res) => {
       // 해외 주식 차트 (Yahoo Finance API 직접 호출)
       try {
         const symbol = query.toUpperCase();
-        const range = period === '1m' ? '1mo' : period === '6m' ? '6mo' : '1y';
+        const range = period === '1m' ? '1mo' : period === '3m' ? '3mo' : period === '6m' ? '6mo' : '1y';
         
         const yfResponse = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
           params: {

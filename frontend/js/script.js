@@ -115,6 +115,69 @@ function addVisionResultMessage(result) {
         </div>
     `;
 
+    // 보강 정보 HTML 생성
+    let enrichmentHtml = '';
+    
+    // 1. 지주회사 정보
+    if (result?.holding_company) {
+        const hc = result.holding_company;
+        enrichmentHtml += `
+            <div class="vision-enrichment-section">
+                <h5>🏢 지주회사 상장 정보</h5>
+                <div class="vision-fields">
+                    ${createVisionField('지주회사', hc.holding_company)}
+                    ${createVisionField('상장 거래소', hc.holding_market)}
+                    ${createVisionField('티커', hc.holding_ticker)}
+                    ${hc.holding_confidence ? `<div class="vision-field"><span class="label">신뢰도</span><span class="value">${(hc.holding_confidence * 100).toFixed(1)}%</span></div>` : ''}
+                </div>
+                ${hc.holding_sources && hc.holding_sources.length > 0 
+                    ? `<div class="vision-sources"><strong>출처:</strong> ${hc.holding_sources.join(', ')}</div>` 
+                    : ''}
+            </div>
+        `;
+    }
+    
+    // 2. 밸류체인 공급사
+    if (result?.value_chain && result.value_chain.length > 0) {
+        enrichmentHtml += `
+            <div class="vision-enrichment-section">
+                <h5>🔗 주요 부품·공급사 (밸류체인)</h5>
+                <div class="value-chain-list">
+                    ${result.value_chain.map((vc, idx) => `
+                        <div class="value-chain-item">
+                            <div class="value-chain-header">
+                                <strong>${idx + 1}. ${vc.component || '-'}</strong>
+                                ${vc.confidence ? `<span class="confidence-badge">신뢰도: ${(vc.confidence * 100).toFixed(0)}%</span>` : ''}
+                            </div>
+                            <div class="vision-fields">
+                                ${createVisionField('공급사', vc.supplier_company)}
+                                ${createVisionField('거래소', vc.supplier_exchange)}
+                                ${createVisionField('티커', vc.supplier_ticker)}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    // 3. 관련 상장사
+    if (result?.related_public_companies && result.related_public_companies.length > 0) {
+        enrichmentHtml += `
+            <div class="vision-enrichment-section">
+                <h5>🔎 제품 관련 상장사</h5>
+                <div class="related-companies-list">
+                    ${result.related_public_companies.map((comp, idx) => `
+                        <div class="related-company-item">
+                            <strong>${idx + 1}. ${comp.company || '-'}</strong>
+                            <span class="company-info">${comp.market || '-'} · ${comp.ticker || '-'}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
     container.innerHTML = `
         <h4>🧠 이미지 분석 결과</h4>
         ${fieldsHtml}
@@ -138,6 +201,7 @@ function addVisionResultMessage(result) {
                 ? `<div class="vision-fallback-note">⚠️ 기본 분석이 실패하여 Gemini 직접 분석 결과가 사용되었습니다.</div>`
                 : ''
         }
+        ${enrichmentHtml}
     `;
 
     const stockCandidate = getVisionStockCandidate(result);
@@ -233,6 +297,16 @@ function getVisionStockCandidate(result) {
     if (result?.fallback) {
         sections.push({ ...result.fallback, source: 'fallback' });
     }
+    // 지주회사 정보도 확인
+    if (result?.holding_company) {
+        const hc = result.holding_company;
+        sections.push({
+            company_ticker: hc.holding_ticker,
+            company_market: hc.holding_market,
+            company: hc.holding_company,
+            source: 'holding_company'
+        });
+    }
 
     for (const section of sections) {
         const ticker = sanitizeTicker(section.company_ticker);
@@ -275,35 +349,37 @@ async function sendMessage() {
     
     console.log('메시지 전송:', message);
     
-    // AI 파서 결과 적용 (쉼표로 구분된 다중 입력이 아닐 때만)
-    let searchInput = message;
-    let aiTicker = null;
-    if (!message.includes(',')) {
-        const aiParseResult = await requestStockParse(message);
-        if (aiParseResult?.is_stock_query && aiParseResult.stock_name) {
-            if (aiParseResult.ticker) {
-                aiTicker = aiParseResult.ticker.trim();
-            }
-            searchInput = (aiTicker || aiParseResult.stock_name).trim();
-            console.log('[AI 파서 적용]', aiParseResult);
-        }
-    }
-    
-    // 사용자 메시지 표시
+    // 사용자 메시지 먼저 표시
     addMessage(message, 'user');
     userInput.value = '';
     
-    // 여러 종목 입력 확인 (쉼표로 구분)
-    const stocks = parseMultipleStocks(searchInput);
+    // 로딩 메시지 표시
+    const loadingId = addLoadingMessage('검색 중...');
     
-    if (stocks.length > 1) {
-        // 여러 종목인 경우 버튼 목록 표시
-        addStockSelectionButtons(stocks);
-    } else {
-        // 단일 종목 검색
-        const loadingId = addLoadingMessage();
+    try {
+        // AI 파서 결과 적용 (쉼표로 구분된 다중 입력이 아닐 때만)
+        let searchInput = message;
+        let aiTicker = null;
+        if (!message.includes(',')) {
+            const aiParseResult = await requestStockParse(message);
+            if (aiParseResult?.is_stock_query && aiParseResult.stock_name) {
+                if (aiParseResult.ticker) {
+                    aiTicker = aiParseResult.ticker.trim();
+                }
+                searchInput = (aiTicker || aiParseResult.stock_name).trim();
+                console.log('[AI 파서 적용]', aiParseResult);
+            }
+        }
         
-        try {
+        // 여러 종목 입력 확인 (쉼표로 구분)
+        const stocks = parseMultipleStocks(searchInput);
+        
+        if (stocks.length > 1) {
+            // 로딩 메시지 제거
+            removeMessage(loadingId);
+            // 여러 종목인 경우 버튼 목록 표시
+            addStockSelectionButtons(stocks);
+        } else {
             // 주가 정보 검색
             const stockData = await fetchStockData(aiTicker || stocks[0] || searchInput);
             
@@ -317,11 +393,11 @@ async function sendMessage() {
                 const botResponse = getBotResponse(message);
                 addMessage(botResponse, 'bot');
             }
-        } catch (error) {
-            removeMessage(loadingId);
-            addMessage('주가 정보를 가져오는 중 오류가 발생했습니다.', 'bot');
-            console.error('오류:', error);
         }
+    } catch (error) {
+        removeMessage(loadingId);
+        addMessage('주가 정보를 가져오는 중 오류가 발생했습니다.', 'bot');
+        console.error('오류:', error);
     }
 }
 
@@ -461,18 +537,27 @@ function addFinancialMessage(companyName, symbol, financialData) {
             ${hasAnnualData ? `<button class="toggle-btn ${hasQuarterData ? '' : 'active'}" data-type="annual">연간</button>` : ''}
         </div>
         ` : ''}
-        <div class="financial-chart-container">
-            <canvas id="${chartId}"></canvas>
-        </div>
-        ${hasSegments ? `
-        <div class="segment-section">
-            <h5 class="segment-title">사업 부문별 매출</h5>
-            <div class="segment-chart-container">
-                <canvas id="${segmentChartId}"></canvas>
+        <div class="financial-chart-slider">
+            <div class="chart-slider-tabs">
+                <button class="chart-slider-tab active" data-chart="financial">재무제표</button>
+                ${hasSegments ? `<button class="chart-slider-tab" data-chart="segment">사업 부문별 매출</button>` : ''}
             </div>
-            ${financialData.segmentDate ? `<div class="segment-date">기준일: ${financialData.segmentDate}</div>` : ''}
+            <div class="chart-slider-container">
+                <div class="chart-slide active" data-chart="financial">
+                    <div class="financial-chart-container">
+                        <canvas id="${chartId}"></canvas>
+                    </div>
+                </div>
+                ${hasSegments ? `
+                <div class="chart-slide" data-chart="segment">
+                    <div class="segment-chart-container">
+                        <canvas id="${segmentChartId}"></canvas>
+                    </div>
+                    ${financialData.segmentDate ? `<div class="segment-date">기준일: ${financialData.segmentDate}</div>` : ''}
+                </div>
+                ` : ''}
+            </div>
         </div>
-        ` : ''}
         <div class="financial-summary">
             <div class="financial-item">
                 <span class="financial-label">매출액</span>
@@ -486,7 +571,18 @@ function addFinancialMessage(companyName, symbol, financialData) {
                 <span class="financial-label">당기순이익</span>
                 <span class="financial-value">${latestYear ? formatNumberInHundredMillion(latest.netIncome) : '-'}</span>
             </div>
-            ${latestYear ? `<div class="financial-year">기준연도: ${latestYear}</div>` : ''}
+        </div>
+        ${latestYear ? `<div class="financial-year">기준연도: ${latestYear}</div>` : ''}
+        <div class="financial-question-buttons">
+            <button class="financial-question-btn" data-type="revenue" data-company="${companyName}" data-symbol="${symbol}">
+                <span class="question-keyword">(매출액)</span> 이 회사 앞으로도 계속 성장할까?
+            </button>
+            <button class="financial-question-btn" data-type="operating" data-company="${companyName}" data-symbol="${symbol}">
+                <span class="question-keyword">(영업이익)</span> 이 회사는 실제로 돈을 잘 벌고 있어?
+            </button>
+            <button class="financial-question-btn" data-type="debt" data-company="${companyName}" data-symbol="${symbol}">
+                <span class="question-keyword">(부채비율)</span> 이 회사 재무 상태 안전한 편이야?
+            </button>
         </div>
     `;
     
@@ -509,12 +605,62 @@ function addFinancialMessage(companyName, symbol, financialData) {
             });
         });
 
-        if (hasSegments) {
-            console.log('세그먼트 데이터:', financialData.segments);
-            renderSegmentChart(segmentChartId, financialData.segments, financialData.segmentCurrency || 'USD');
-        } else {
-            console.log('세그먼트 데이터 없음');
-        }
+        // 차트 슬라이더 탭 이벤트
+        const chartTabs = financialSection.querySelectorAll('.chart-slider-tab');
+        const chartSlides = financialSection.querySelectorAll('.chart-slide');
+        
+        chartTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const chartType = tab.dataset.chart;
+                
+                // 탭 활성화
+                chartTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // 슬라이드 전환
+                chartSlides.forEach(slide => {
+                    if (slide.dataset.chart === chartType) {
+                        slide.classList.add('active');
+                    } else {
+                        slide.classList.remove('active');
+                    }
+                });
+                
+                // 세그먼트 차트가 처음 보일 때 렌더링
+                if (chartType === 'segment' && hasSegments) {
+                    const segmentSlide = financialSection.querySelector('.chart-slide[data-chart="segment"]');
+                    const segmentCanvas = segmentSlide.querySelector('canvas');
+                    if (segmentCanvas && !segmentCanvas.dataset.rendered) {
+                        console.log('세그먼트 데이터:', financialData.segments);
+                        renderSegmentChart(segmentChartId, financialData.segments, financialData.segmentCurrency || 'USD');
+                        segmentCanvas.dataset.rendered = 'true';
+                    }
+                }
+            });
+        });
+
+        // 세그먼트 차트는 탭 클릭 시에만 렌더링 (지연 로딩)
+        
+        // 재무 질문 버튼 이벤트 리스너
+        const questionButtons = financialSection.querySelectorAll('.financial-question-btn');
+        questionButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const questionType = btn.dataset.type;
+                const company = btn.dataset.company;
+                const symbol = btn.dataset.symbol;
+                
+                if (questionType === 'operating') {
+                    // 영업이익 상세 카드 표시
+                    addOperatingIncomeCard(company, symbol);
+                } else if (questionType === 'revenue') {
+                    // 매출액 상세 카드 표시
+                    addRevenueCard(company, symbol);
+                } else if (questionType === 'debt') {
+                    // 부채비율 상세 카드 표시
+                    addDebtRatioCard(company, symbol);
+                }
+            });
+        });
     }, 100);
     
     // 스크롤을 맨 아래로
@@ -944,6 +1090,9 @@ async function addStockMessage(stockData) {
             <button class="action-btn news-btn" data-symbol="${stockData.symbol}">
                 📰 뉴스
             </button>
+            <button class="action-btn favorite-btn" data-symbol="${stockData.symbol}" data-company="${stockData.name}">
+                ⭐ 관심종목
+            </button>
         </div>
     `;
     
@@ -954,6 +1103,14 @@ async function addStockMessage(stockData) {
     // 버튼 이벤트 리스너 추가
     const financialBtn = stockInfo.querySelector('.financial-btn');
     const newsBtn = stockInfo.querySelector('.news-btn');
+    const favoriteBtn = stockInfo.querySelector('.favorite-btn');
+    
+    if (favoriteBtn) {
+        favoriteBtn.addEventListener('click', () => {
+            // TODO: 관심종목 기능 구현
+            console.log('관심종목 버튼 클릭:', stockData.symbol, stockData.name);
+        });
+    }
     
     if (financialBtn) {
         financialBtn.addEventListener('click', async () => {
@@ -1021,6 +1178,289 @@ async function addStockMessage(stockData) {
 }
 
 // 차트 렌더링
+
+// 영업이익 상세 카드 추가
+function addOperatingIncomeCard(companyName, symbol) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message bot-message';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content financial-detail-card';
+    contentDiv.style.background = 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)'; // 파란색 배경
+    
+    // 작은 그래프를 위한 캔버스 ID 생성
+    const miniChartId = `operating-mini-chart-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    contentDiv.innerHTML = `
+        <div class="financial-detail-header">
+            <h3 class="financial-detail-title">${companyName} 영업이익</h3>
+            <div class="financial-detail-mini-chart">
+                <canvas id="${miniChartId}"></canvas>
+            </div>
+        </div>
+        <div class="financial-detail-summary">
+            최근 3년간 영업이익이 증가하고 있어요.
+        </div>
+        <div class="financial-detail-question">
+            왜 증가했나요?
+        </div>
+        <div class="financial-detail-reasons">
+            <div class="financial-detail-reason-item">• 본업에서 실제로 남는 돈이 증가하는 중</div>
+            <div class="financial-detail-reason-item">• 비용 관리 개선 → 수익성 상승</div>
+            <div class="financial-detail-reason-item">• 매출 증가와 함께 이익도 성장하는 구조</div>
+        </div>
+        <div class="financial-detail-more">
+            더 자세히 보시겠어요?
+        </div>
+        <button class="financial-detail-btn" data-type="operating-detail" data-company="${companyName}" data-symbol="${symbol}">
+            영업이익 상세 보기
+        </button>
+    `;
+    
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+    
+    // 작은 그래프 렌더링 (우상향 추세)
+    setTimeout(() => {
+        renderMiniOperatingChart(miniChartId);
+    }, 100);
+    
+    // 상세 보기 버튼 이벤트 리스너
+    const detailBtn = contentDiv.querySelector('.financial-detail-btn');
+    if (detailBtn) {
+        detailBtn.addEventListener('click', () => {
+            console.log('영업이익 상세 보기 클릭:', companyName, symbol);
+            // TODO: 상세 정보 표시
+        });
+    }
+    
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// 영업이익 미니 차트 렌더링 (우상향 추세)
+function renderMiniOperatingChart(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    // 우상향 추세 데이터 생성
+    const labels = ['1년 전', '2년 전', '3년 전'];
+    const data = [75, 85, 95]; // 증가 추세
+    
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '영업이익',
+                data: data,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                tension: 0.4,
+                fill: true,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                pointBackgroundColor: function(context) {
+                    const index = context.dataIndex;
+                    if (index === 0) return '#ef4444'; // 시작점 빨간색
+                    if (index === data.length - 1) return '#3b82f6'; // 끝점 파란색
+                    return '#94a3b8'; // 중간점 회색
+                },
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    enabled: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    display: false
+                },
+                x: {
+                    display: false
+                }
+            }
+        }
+    });
+}
+
+// 매출액 상세 카드 추가
+function addRevenueCard(companyName, symbol) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message bot-message';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content financial-detail-card';
+    contentDiv.style.background = 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)'; // 파란색 배경
+    
+    // 작은 그래프를 위한 캔버스 ID 생성
+    const miniChartId = `revenue-mini-chart-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    contentDiv.innerHTML = `
+        <div class="financial-detail-header">
+            <h3 class="financial-detail-title">${companyName} 매출액</h3>
+            <div class="financial-detail-mini-chart">
+                <canvas id="${miniChartId}"></canvas>
+            </div>
+        </div>
+        <div class="financial-detail-summary">
+            최근 3년간 매출액이 증가하고 있어요.
+        </div>
+        <div class="financial-detail-question">
+            왜 증가했나요?
+        </div>
+        <div class="financial-detail-reasons">
+            <div class="financial-detail-reason-item">• 제품 판매가 꾸준히 늘고 있고</div>
+            <div class="financial-detail-reason-item">• 해외 매출 비중이 커지고 있으며</div>
+            <div class="financial-detail-reason-item">• 브랜드 인지도 상승이 매출을 밀어주고 있어요.</div>
+        </div>
+        <div class="financial-detail-more">
+            더 자세히 보시겠어요?
+        </div>
+        <button class="financial-detail-btn" data-type="revenue-detail" data-company="${companyName}" data-symbol="${symbol}">
+            매출 상세 보기
+        </button>
+    `;
+    
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+    
+    // 작은 그래프 렌더링 (우상향 추세)
+    setTimeout(() => {
+        renderMiniRevenueChart(miniChartId);
+    }, 100);
+    
+    // 상세 보기 버튼 이벤트 리스너
+    const detailBtn = contentDiv.querySelector('.financial-detail-btn');
+    if (detailBtn) {
+        detailBtn.addEventListener('click', () => {
+            console.log('매출 상세 보기 클릭:', companyName, symbol);
+            // TODO: 상세 정보 표시
+        });
+    }
+    
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// 매출액 미니 차트 렌더링 (우상향 추세)
+function renderMiniRevenueChart(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    // 우상향 추세 데이터 생성
+    const labels = ['1년 전', '2년 전', '3년 전'];
+    const data = [80, 90, 100]; // 증가 추세
+    
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '매출액',
+                data: data,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                tension: 0.4,
+                fill: true,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                pointBackgroundColor: function(context) {
+                    const index = context.dataIndex;
+                    if (index === 0) return '#ef4444'; // 시작점 빨간색
+                    if (index === data.length - 1) return '#3b82f6'; // 끝점 파란색
+                    return '#94a3b8'; // 중간점 회색
+                },
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    enabled: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    display: false
+                },
+                x: {
+                    display: false
+                }
+            }
+        }
+    });
+}
+
+// 부채비율 상세 카드 추가
+function addDebtRatioCard(companyName, symbol) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message bot-message';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content financial-detail-card';
+    contentDiv.style.background = 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)'; // 파란색 배경
+    
+    contentDiv.innerHTML = `
+        <div class="financial-detail-header">
+            <h3 class="financial-detail-title">${companyName} 부채비율</h3>
+        </div>
+        <div class="financial-detail-summary">
+            이 회사는 120% 수준으로 '보통' 구간에 있어요.
+        </div>
+        <div class="financial-detail-question">
+            부채비율이 줄어든 이유는?
+        </div>
+        <div class="financial-detail-reasons">
+            <div class="financial-detail-reason-item">• 이익이 늘면서 자본이 커졌고</div>
+            <div class="financial-detail-reason-item">• 차입금 규모가 안정적으로 유지되었기 때문이에요.</div>
+        </div>
+        <div class="financial-detail-more">
+            더 자세히 보시겠어요?
+        </div>
+        <button class="financial-detail-btn" data-type="debt-detail" data-company="${companyName}" data-symbol="${symbol}">
+            부채비율 상세 보기
+        </button>
+    `;
+    
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+    
+    // 상세 보기 버튼 이벤트 리스너
+    const detailBtn = contentDiv.querySelector('.financial-detail-btn');
+    if (detailBtn) {
+        detailBtn.addEventListener('click', () => {
+            console.log('부채비율 상세 보기 클릭:', companyName, symbol);
+            // TODO: 상세 정보 표시
+        });
+    }
+    
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
 function renderChart(canvasId, chartData) {
     const canvas = document.getElementById(canvasId);
     if (!canvas || !chartData.data || chartData.data.length === 0) {
