@@ -21,21 +21,28 @@ class GoogleVisionAnalyzer:
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         
         if credentials_path:
-            # 상대 경로를 절대 경로로 변환
+            # 상대 경로를 절대 경로로 변환 (현재 파일 기준이 아닌 프로젝트 루트 기준)
             if not os.path.isabs(credentials_path):
-                credentials_path = os.path.join(os.getcwd(), credentials_path)
+                # 현재 파일의 루트 디렉토리 찾기 (vision 폴더의 상위)
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                root_dir = os.path.dirname(current_dir)  # vision의 상위 = 프로젝트 루트
+                credentials_path = os.path.join(root_dir, credentials_path)
+            
+            # 경로 정규화 (백슬래시/슬래시 통일)
+            credentials_path = os.path.normpath(credentials_path)
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
             
             # 파일 존재 확인
             if not os.path.exists(credentials_path):
                 raise FileNotFoundError(
                     f"서비스 계정 키 파일을 찾을 수 없습니다: {credentials_path}\n"
-                    "파일 경로를 확인해주세요."
+                    f"파일 경로를 확인해주세요.\n"
+                    f"현재 작업 디렉토리: {os.getcwd()}"
                 )
         
         try:
             self.client = vision.ImageAnnotatorClient()
-            print("✅ Google Cloud Vision 클라이언트 초기화 완료")
+            print(f"✅ Google Cloud Vision 클라이언트 초기화 완료 (인증 파일: {credentials_path})")
         except Exception as e:
             raise ValueError(
                 f"Google Cloud Vision 클라이언트 초기화 실패: {str(e)}\n"

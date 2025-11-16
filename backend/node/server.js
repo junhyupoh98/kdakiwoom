@@ -445,5 +445,6 @@ app.get('/api/stock/:query/financials', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);
   console.log(`Python 서버는 ${PYTHON_SERVER_URL}에서 실행되어야 합니다.`);
+  console.log(`UI: http://localhost:${PORT}`);
 });
 

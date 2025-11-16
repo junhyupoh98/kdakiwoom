@@ -3,11 +3,380 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>주식 챗봇</title>
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* 관심 종목 별 버튼 스타일 */
+        .stock-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            gap: 12px;
+        }
+        
+        .stock-header-left {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .favorite-star-btn {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: rgba(166, 117, 238, 0.1);
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 0;
+        }
+        
+        .favorite-star-btn:hover {
+            background: rgba(166, 117, 238, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .favorite-star-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .favorite-star-btn .star-icon {
+            width: 22px;
+            height: 22px;
+            color: #a675ee;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .favorite-star-btn.active {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+        }
+        
+        .favorite-star-btn.active .star-icon {
+            color: #ffffff;
+            fill: #ffffff;
+        }
+        
+        /* 메인카드 버튼 스타일 개선 */
+        .stock-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+        
+        .action-btn {
+            flex: 1;
+            min-height: 48px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 600;
+            white-space: nowrap;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: linear-gradient(135deg, rgba(166, 117, 238, 0.1) 0%, rgba(166, 117, 238, 0.05) 100%);
+            color: #6b21a8;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        
+        .action-btn:hover {
+            background: linear-gradient(135deg, rgba(166, 117, 238, 0.2) 0%, rgba(166, 117, 238, 0.1) 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(166, 117, 238, 0.2);
+        }
+        
+        .action-btn:active {
+            transform: translateY(0);
+        }
+        
+        .action-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* 메인카드 너비 조정 */
+        .message-content.stock-content {
+            max-width: 95% !important;
+            width: 95% !important;
+        }
+        
+        /* 모바일에서 더 넓게 */
+        @media (max-width: 768px) {
+            .message-content.stock-content {
+                max-width: 98% !important;
+                width: 98% !important;
+                margin: 0 auto;
+            }
+        }
+        
+        /* 차트 컨테이너도 너비 최대화 */
+        .chart-container {
+            width: 100%;
+            padding: 12px 8px;
+        }
+        
+        .chart-container canvas {
+            max-width: 100% !important;
+            height: auto !important;
+        }
+        
+        /* 피어그룹 계층적 스타일 */
+        .peer-company-group {
+            margin-bottom: 24px;
+            padding: 16px;
+            background: linear-gradient(135deg, rgba(166, 117, 238, 0.08) 0%, rgba(166, 117, 238, 0.03) 100%);
+            border-radius: 12px;
+            border: 1px solid rgba(166, 117, 238, 0.15);
+        }
+        
+        .peer-company-header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid rgba(166, 117, 238, 0.2);
+        }
+        
+        .peer-company-name {
+            font-size: 17px;
+            font-weight: 700;
+            color: #7c3aed;
+            margin: 0;
+        }
+        
+        .peer-category-section {
+            margin-bottom: 16px;
+        }
+        
+        .peer-category-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #6b21a8;
+            margin-bottom: 10px;
+            padding: 6px 12px;
+            background: rgba(166, 117, 238, 0.15);
+            border-radius: 6px;
+            display: inline-block;
+        }
+        
+        .peer-competitors {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .peer-item {
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            border: 1px solid rgba(166, 117, 238, 0.1);
+        }
+        
+        .peer-item:hover {
+            background: rgba(255, 255, 255, 0.95);
+            transform: translateX(4px);
+            box-shadow: 0 2px 8px rgba(166, 117, 238, 0.15);
+        }
+        
+        .peer-info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .peer-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #374151;
+            flex: 1;
+        }
+        
+        .peer-ticker {
+            font-size: 13px;
+            font-weight: 500;
+            color: #6b7280;
+            background: rgba(166, 117, 238, 0.1);
+            padding: 4px 10px;
+            border-radius: 6px;
+            white-space: nowrap;
+        }
+        
+        .no-data-message {
+            padding: 24px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+            background: rgba(166, 117, 238, 0.05);
+            border-radius: 8px;
+        }
+        
+        /* 모바일 최적화 */
+        @media (max-width: 768px) {
+            .peer-company-group {
+                padding: 12px;
+            }
+            
+            .peer-company-name {
+                font-size: 16px;
+            }
+            
+            .peer-category-title {
+                font-size: 13px;
+                padding: 5px 10px;
+            }
+            
+            .peer-name {
+                font-size: 14px;
+            }
+            
+            .peer-ticker {
+                font-size: 12px;
+                padding: 3px 8px;
+            }
+            
+            .peer-info-row {
+                gap: 8px;
+            }
+        }
+        
+        /* 밸류체인 탭 스타일 */
+        .value-chain-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid rgba(166, 117, 238, 0.2);
+            padding-bottom: 0;
+        }
+        
+        .vc-tab-btn {
+            flex: 1;
+            padding: 12px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #6b7280;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            bottom: -2px;
+        }
+        
+        .vc-tab-btn:hover {
+            color: #7c3aed;
+            background: rgba(166, 117, 238, 0.05);
+        }
+        
+        .vc-tab-btn.active {
+            color: #7c3aed;
+            border-bottom-color: #7c3aed;
+            font-weight: 700;
+        }
+        
+        .vc-tab-content {
+            display: none;
+        }
+        
+        .vc-tab-content.active {
+            display: block;
+        }
+        
+        /* 밸류체인 계층적 스타일 */
+        .vc-industry-group {
+            margin-bottom: 24px;
+            padding: 16px;
+            background: linear-gradient(135deg, rgba(166, 117, 238, 0.08) 0%, rgba(166, 117, 238, 0.03) 100%);
+            border-radius: 12px;
+            border: 1px solid rgba(166, 117, 238, 0.15);
+        }
+        
+        .vc-industry-header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid rgba(166, 117, 238, 0.2);
+        }
+        
+        .vc-industry-name {
+            font-size: 17px;
+            font-weight: 700;
+            color: #7c3aed;
+            margin: 0;
+        }
+        
+        .vc-relationship-section {
+            margin-bottom: 16px;
+        }
+        
+        .vc-relationship-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #6b21a8;
+            margin-bottom: 10px;
+            padding: 6px 12px;
+            background: rgba(166, 117, 238, 0.15);
+            border-radius: 6px;
+            display: inline-block;
+        }
+        
+        .vc-category-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #6b7280;
+            margin: 8px 0 6px 0;
+            padding: 4px 10px;
+            background: rgba(166, 117, 238, 0.1);
+            border-radius: 4px;
+            display: inline-block;
+        }
+        
+        .vc-companies {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        /* 모바일 최적화 - 밸류체인 */
+        @media (max-width: 768px) {
+            .vc-tab-btn {
+                font-size: 14px;
+                padding: 10px 16px;
+            }
+            
+            .vc-industry-group {
+                padding: 12px;
+            }
+            
+            .vc-industry-name {
+                font-size: 16px;
+            }
+            
+            .vc-relationship-title {
+                font-size: 14px;
+                padding: 5px 10px;
+            }
+            
+            .vc-category-label {
+                font-size: 12px;
+                padding: 3px 8px;
+            }
+        }
+    </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
     <!-- 첫 페이지 (랜딩 페이지) -->
@@ -26,105 +395,92 @@
         </div>
         
         <!-- 검색 아이콘 -->
-        <button class="landing-icon-search" type="button">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
-                <path d="M16 16L20 20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-        </button>
+        <div class="search-toggle-container">
+            <button class="landing-icon-search" type="button" id="searchToggleButton">
+                <i data-lucide="search" width="24" height="24"></i>
+            </button>
+            <div class="search-toggle-menu" id="searchToggleMenu" style="display: none;">
+                <button class="toggle-menu-item" id="searchStockButton">
+                    <i data-lucide="trending-up" width="20" height="20"></i>
+                    <span>주식 검색</span>
+                </button>
+                <button class="toggle-menu-item" id="searchNewsButton">
+                    <i data-lucide="newspaper" width="20" height="20"></i>
+                    <span>뉴스 검색</span>
+                </button>
+            </div>
+        </div>
         
         <!-- 알림 아이콘 -->
         <button class="landing-icon-bell" type="button">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <path d="M18 8C18 6.4087 17.3679 4.88258 16.2426 3.75736C15.1174 2.63214 13.5913 2 12 2C10.4087 2 8.88258 2.63214 7.75736 3.75736C6.63214 4.88258 6 6.4087 6 8C6 15 3 17 3 17H21C21 17 18 15 18 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M13.73 21C13.5542 21.3031 13.3019 21.5547 12.9982 21.7295C12.6946 21.9044 12.3504 21.9965 12 21.9965C11.6496 21.9965 11.3054 21.9044 11.0018 21.7295C10.6982 21.5547 10.4458 21.3031 10.27 21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <i data-lucide="bell" width="24" height="24"></i>
         </button>
         
         <!-- 메뉴 아이콘 -->
         <button class="landing-icon-menu" type="button">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <path d="M3 12H21M3 6H21M3 18H21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
+            <i data-lucide="menu" width="24" height="24"></i>
         </button>
         
-        <!-- 메인 보라색 카드 -->
-        <div class="landing-main-card"></div>
-        
-        <!-- 검색 입력창 -->
-        <div class="landing-search-input"></div>
-        
-        <!-- 메인 텍스트 -->
-        <div class="landing-main-text">
-            <p>일상 속 투자 기회를</p>
-            <p>사진으로 발견하세요!</p>
+        <!-- 상단 검색바 (채팅창으로 이동) -->
+        <div class="landing-search-bar" id="landingSearchBar">
+            <i data-lucide="search" width="20" height="20"></i>
+            <span class="search-placeholder">사진 한장으로 투자 종목을 찾을 수 있다면?</span>
+            <i data-lucide="image" width="20" height="20"></i>
         </div>
         
-        <!-- 서브 텍스트 -->
-        <div class="landing-sub-text">
-            사진 한장으로 투자 종목을 찾을 수 있다면?
-        </div>
-        
-        <!-- 주가지수 섹션 -->
-        <div class="landing-index-section">
-            <div class="index-tabs">
-                <button class="index-tab active" data-market="kr">국내</button>
-                <button class="index-tab" data-market="us">미국</button>
+        <!-- 주요 지수 섹션 (가로 스크롤) -->
+        <div class="landing-top-section">
+            <div class="index-tabs-header">
+                <button class="index-tab-main active" data-market="kr">국내</button>
+                <button class="index-tab-main" data-market="us">미국</button>
             </div>
-            <div class="index-cards-container" id="indexCardsContainer">
-                <!-- 지수 카드들이 여기에 동적으로 추가됩니다 -->
+            <div class="index-cards-scroll-container">
+                <div class="index-cards-scroll" id="indexCardsContainer">
+                    <!-- 지수 카드들이 여기에 동적으로 추가됩니다 -->
+                </div>
             </div>
         </div>
         
-        <!-- 시가총액 상위 종목 섹션 -->
-        <div class="landing-top-stocks-section">
-            <div class="top-stocks-list" id="topStocksList">
-                <!-- 상위 종목들이 여기에 동적으로 추가됩니다 -->
+        <!-- 실시간 랭킹 TOP5 섹션 -->
+        <div class="landing-section ranking-section">
+            <div class="ranking-header">
+                <h2 class="ranking-title">실시간 랭킹 TOP5</h2>
+                <div class="ranking-icon">📊</div>
+            </div>
+            <div class="ranking-tabs">
+                <button class="ranking-tab active" data-type="popular">많이보는</button>
+                <button class="ranking-tab" data-type="volume">거래량많은</button>
+                <button class="ranking-tab" data-type="gainers">급등주</button>
+                <button class="ranking-tab" data-type="new">신규상장</button>
+            </div>
+            <div class="ranking-list" id="rankingList">
+                <!-- 랭킹 종목들이 여기에 동적으로 추가됩니다 -->
             </div>
         </div>
         
         <!-- 하단 네비게이션 -->
         <div class="landing-navigation">
             <button class="nav-item active">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M9 22V12H15V22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <i data-lucide="home" width="24" height="24"></i>
                 <span>탐색</span>
             </button>
             <button class="nav-item">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                    <path d="M20.84 4.61C20.3292 4.099 19.7228 3.69364 19.0554 3.41708C18.3879 3.14052 17.6725 2.99817 16.95 2.99817C16.2275 2.99817 15.5121 3.14052 14.8446 3.41708C14.1772 3.69364 13.5708 4.099 13.06 4.61L12 5.67L10.94 4.61C9.9083 3.57831 8.50903 2.99871 7.05 2.99871C5.59096 2.99871 4.19169 3.57831 3.16 4.61C2.1283 5.64169 1.54871 7.04097 1.54871 8.5C1.54871 9.95903 2.1283 11.3583 3.16 12.39L4.22 13.45L12 21.23L19.78 13.45L20.84 12.39C21.351 11.8792 21.7564 11.2728 22.0329 10.6054C22.3095 9.93789 22.4518 9.22248 22.4518 8.5C22.4518 7.77752 22.3095 7.0621 22.0329 6.39464C21.7564 5.72718 21.351 5.12075 20.84 4.61Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <i data-lucide="heart" width="24" height="24"></i>
                 <span>관심</span>
             </button>
             <button class="nav-item">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <i data-lucide="layers" width="24" height="24"></i>
                 <span>자산</span>
             </button>
             <button class="nav-item">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <i data-lucide="star" width="24" height="24"></i>
                 <span>혜택</span>
             </button>
         </div>
         
         <!-- 중앙 카메라 플로팅 버튼 -->
         <button id="landingCameraFloatingButton" class="landing-camera-floating-btn" type="button">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
-                <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
-                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/>
-            </svg>
-        </button>
-        
-        <!-- 시작 버튼 (서브 텍스트 클릭 가능) -->
-        <button id="startChatButton" class="start-chat-button-text">
-            사진 한장으로 투자 종목을 찾을 수 있다면?
+            <i data-lucide="camera" width="36" height="36"></i>
         </button>
     </div>
 
@@ -132,10 +488,7 @@
     <div id="chatPage" class="chat-container" style="display: none;">
         <div class="chat-header">
             <button id="homeButton" class="home-button" type="button" aria-label="홈으로">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M9 22V12H15V22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <i data-lucide="home" width="24" height="24"></i>
             </button>
             <h1>주식 챗봇</h1>
         </div>
@@ -147,45 +500,51 @@
                 </div>
             </div>
         </div>
-        <div class="chat-input-container">
-            <input type="file" id="imageUploadInput" accept="image/*" hidden />
-            <button id="imageUploadButton" type="button" aria-label="이미지 업로드">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
-                    <path d="M12 8V16M8 12H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-            </button>
-            <input type="text" id="userInput" placeholder="PicMe에게 물어보세요" />
-            <button id="sendButton">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
-        </div>
         
-        <!-- 이미지 선택 모달 -->
-        <div id="imageSelectModal" class="image-select-modal" style="display: none;">
-            <div class="image-select-modal-content">
-                <button id="cameraButton" class="image-select-btn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
-                        <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/>
-                    </svg>
-                    <span>카메라</span>
+        <!-- 빠른 액션 바 (드래그해서 올리기) -->
+        <div class="quick-action-bar" id="quickActionBar">
+            <div class="quick-action-handle" id="quickActionHandle">
+                <div class="handle-bar"></div>
+            </div>
+            <div class="quick-action-content">
+                <button class="quick-action-btn trade-btn">
+                    <span>매매 바로가기</span>
                 </button>
-                <button id="albumButton" class="image-select-btn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
-                        <path d="M3 9L9 3H15L21 9V19H3V9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
-                    </svg>
-                    <span>앨범</span>
+                <button class="quick-action-btn favorite-btn">
+                    <span>관심종목 바로가기</span>
                 </button>
             </div>
         </div>
+        
+        <div class="chat-input-container">
+            <input type="file" id="imageUploadInput" accept="image/*" hidden />
+            <div class="image-toggle-container">
+                <button id="imageUploadButton" type="button" aria-label="이미지 업로드">
+                    <i data-lucide="image-plus" width="20" height="20"></i>
+                </button>
+                <div class="image-toggle-menu" id="imageToggleMenu" style="display: none;">
+                    <button class="toggle-menu-item" id="cameraButton">
+                        <i data-lucide="camera" width="20" height="20"></i>
+                        <span>카메라</span>
+                    </button>
+                    <button class="toggle-menu-item" id="albumButton">
+                        <i data-lucide="image" width="20" height="20"></i>
+                        <span>앨범</span>
+                    </button>
+                </div>
+            </div>
+            <input type="text" id="userInput" placeholder="PicMe에게 물어보세요" />
+            <button id="sendButton">
+                <i data-lucide="send" width="24" height="24"></i>
+            </button>
+        </div>
     </div>
     <script src="js/script.js"></script>
+    <script>
+        // Lucide 아이콘 초기화
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+        });
+    </script>
 </body>
 </html>
-

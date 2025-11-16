@@ -35,9 +35,17 @@ except ImportError:
     )
 
 try:
-    from .vision_bridge import analyze_product_from_image
-except ImportError:
-    from vision_bridge import analyze_product_from_image  # type: ignore
+    # 패키지 실행/단일 스크립트 실행 모두 대응
+    try:
+        from .vision_bridge import analyze_product_from_image
+    except Exception:
+        from vision_bridge import analyze_product_from_image  # type: ignore
+except Exception as e:
+    raise ImportError(
+        "Vision 기능이 필수입니다. 'pip install google-cloud-vision' 설치 및 "
+        "환경변수 GOOGLE_APPLICATION_CREDENTIALS 설정이 필요합니다. "
+        f"원인: {e}"
+    )
 from pathlib import Path
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 # DART API는 requests로 직접 호출
@@ -1291,7 +1299,8 @@ def get_stock_financials(symbol):
                         'netIncome': latest.get('netIncome', 0) or 0,
                         'operatingIncome': latest.get('operatingIncome', 0) or 0,
                         'year': latest_label
-                    }
+                    },
+                    'currency': 'KRW'
                 }
                 
                 # 세그먼트 데이터가 있으면 추가
@@ -1371,6 +1380,9 @@ def get_stock_financials(symbol):
             # 최신 데이터
             latest = income_statements[0] if income_statements else {}
             
+            # 통화 정보 가져오기
+            currency = get_reported_currency(clean_symbol)
+            
             # 세그먼트 데이터 병렬로 가져오기 (선택적, 실패해도 무방)
             segment_data = None
             try:
@@ -1397,7 +1409,8 @@ def get_stock_financials(symbol):
                     'netIncome': latest.get('netIncome', 0) or 0,
                     'operatingIncome': latest.get('operatingIncome', 0) or 0,
                     'year': latest.get('calendarYear', '')
-                }
+                },
+                'currency': currency
             }
             
             # 세그먼트 데이터가 있으면 추가
@@ -1637,7 +1650,8 @@ def get_dart_financials(corp_code, symbol):
                 'netIncome': latest.get('netIncome', 0) or 0,
                 'operatingIncome': latest.get('operatingIncome', 0) or 0,
                 'year': latest.get('year', '')
-            }
+            },
+            'currency': 'KRW'
         }
     except Exception as e:
         print(f'DART API 오류: {e}')
@@ -1946,7 +1960,11 @@ def analyze_image_route():
         if not image_bytes:
             return jsonify({'error': '빈 이미지입니다.'}), 400
 
-        result = analyze_product_from_image(image_bytes)
+        # 빠른 모드: 보강(enrichment) 생략하여 응답 속도 향상
+        mode = (request.args.get('mode') or '').strip().lower()
+        enrich = False if mode in ('quick', 'fast', 'lite') else True
+
+        result = analyze_product_from_image(image_bytes, enrich=enrich)
         return jsonify(result)
     except Exception as e:
         print(f'[ERROR] Vision 분석 실패: {e}')
@@ -2168,6 +2186,189 @@ def test_chat():
         return jsonify({"error": "요청 처리 중 오류가 발생했습니다."}), 500
 
 
+@app.route('/api/finance/qa', methods=['POST'])
+def finance_qa():
+    """
+    금융/투자 용어 및 기본 개념 질의응답.
+    우선 간단한 사전으로 처리하고, 키가 있을 경우 LLM로 보강.
+    """
+    try:
+        data = request.json or {}
+        question = (data.get('question') or '').strip()
+        if not question:
+            return jsonify({'answer': ''})
+
+        # ---------- 비금융 차단 게이트 ----------
+        def _is_finance_basic(q: str) -> str:
+            """규칙 기반 1차 분류: 'true' | 'false' | 'unsure'"""
+            ql = (q or "").lower()
+            whitelist = [
+                '주식','증권','etf','선물','옵션','환율','금리','인플레이션',
+                '배당','배당수익률','per','pbr','roe','roa','eps','bps','psr','ev/ebitda',
+                '매수','매도','평단','평균매수가','매수가','매도가','손절','익절',
+                '차트','캔들','이동평균','rsi','macd','볼린저','거래량','시가총액','유동비율',
+                '영업이익','순이익','현금흐름','부채비율','재무제표','손익계산서','대차대조표','현금흐름표',
+                'kospi','코스피','kosdaq','코스닥','krx','nasdaq','nyse','s&p','sp500','다우','nikkei',
+                '티커','상장','공모','공매도','밸류에이션','가치평가','포트폴리오','리밸런싱'
+            ]
+            blacklist = [
+                '날씨','레시피','요리','농담','웃긴','영화','드라마','음악','가사','게임','여행','식당','식품',
+                '운동','건강','연애','심리','철학','역사','정치','뉴스','유머','수학문제','코딩문제'
+            ]
+            if any(k in ql for k in whitelist):
+                return 'true'
+            if any(k in ql for k in blacklist):
+                return 'false'
+            return 'unsure'
+
+        def _classify_finance_llm(q: str) -> str:
+            """LLM 분류: 'true' | 'false' | 'unsure'"""
+            try:
+                if openai_client:
+                    prompt = (
+                        "다음 질문이 금융/투자/주식 관련이면 'finance', 아니면 'non-finance'만 출력:\n\n"
+                        f"질문: {q}"
+                    )
+                    resp = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "출력은 finance 또는 non-finance 둘 중 하나만."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0,
+                        max_tokens=3,
+                    )
+                    out = (resp.choices[0].message.content or "").strip().lower()
+                    if 'finance' in out and 'non' not in out:
+                        return 'true'
+                    if 'non' in out:
+                        return 'false'
+                    return 'unsure'
+                if GEMINI_API_KEY:
+                    url = (
+                        "https://generativelanguage.googleapis.com/v1beta/models/"
+                        "gemini-1.5-flash:generateContent"
+                        f"?key={GEMINI_API_KEY}"
+                    )
+                    payload = {
+                        "contents": [
+                            {"role": "user", "parts": [{
+                                "text": (
+                                    "금융/투자/주식 관련이면 finance, 아니면 non-finance만 출력.\n\n"
+                                    f"질문: {q}"
+                                )
+                            }]}
+                        ]
+                    }
+                    r = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=10)
+                    r.raise_for_status()
+                    data_json = r.json()
+                    txt = ""
+                    for part in data_json.get("candidates", [{}])[0].get("content", {}).get("parts", []):
+                        if "text" in part:
+                            txt += part["text"]
+                    out = (txt or "").strip().lower()
+                    if 'finance' in out and 'non' not in out:
+                        return 'true'
+                    if 'non' in out:
+                        return 'false'
+                    return 'unsure'
+            except Exception as e:
+                print(f"[WARN] LLM 분류 실패: {e}")
+            return 'unsure'
+
+        basic = _is_finance_basic(question)
+        if basic == 'false':
+            return jsonify({'answer': '이 챗봇은 금융/투자 관련 질문에만 답변합니다. 예: "매수가", "PER", "배당수익률"'})
+        if basic == 'unsure':
+            llm_res = _classify_finance_llm(question)
+            if llm_res != 'true':
+                return jsonify({'answer': '이 챗봇은 금융/투자 관련 질문에만 답변합니다. 예: "매수가", "PER", "배당수익률"'})
+        # ---------------------------------------
+
+        glossary = {
+            # 기본 용어 사전 (간결 정의)
+            '매수': '매수는 주식이나 자산을 사는 행위를 말합니다. 매수 가격은 실제로 거래가 체결된 가격입니다.',
+            '매수란': '매수는 주식이나 자산을 사는 행위를 말합니다. 매수 가격은 실제로 거래가 체결된 가격입니다.',
+            '매수가': '매수가는 내가 해당 종목을 산 가격(체결가)의 평균을 의미합니다. 여러 번 나누어 샀다면 매수 물량 가중 평균으로 계산됩니다.',
+            '매도': '매도는 보유한 주식이나 자산을 파는 행위를 말합니다. 매도가격은 실제로 거래가 체결된 가격입니다.',
+            '매도가': '매도가는 내가 해당 종목을 판 가격(체결가)의 평균을 의미합니다.',
+            'PER': 'PER(주가수익비율)은 주가를 주당순이익(EPS)으로 나눈 값으로, 낮을수록 이익 대비 주가가 낮게 평가된 것입니다.',
+            'PBR': 'PBR(주가순자산비율)은 주가를 주당순자산(BPS)으로 나눈 값입니다. 1 미만이면 장부가치보다 낮게 거래 중일 수 있습니다.',
+            '배당수익률': '배당수익률은 연간 배당금을 현재 주가로 나눈 비율입니다. 높을수록 배당 측면에서 유리하지만, 지속 가능성도 함께 봐야 합니다.',
+            '시가총액': '시가총액은 주가 × 발행주식수로 계산합니다. 기업의 시장 내 상대적 규모를 나타냅니다.',
+            '유동비율': '유동비율은 유동자산/유동부채 × 100으로 단기 지급능력을 나타냅니다. 100% 이상이 일반적으로 안정적입니다.'
+        }
+
+        # 매우 간단한 키워드 매칭 (질문 안에서 용어가 보이면 즉시 정의 반환)
+        q_lower = question.lower()
+        for key, val in glossary.items():
+            if key.lower() in q_lower:
+                return jsonify({'answer': val})
+
+        # LLM 사용 (가능할 때)
+        # 1) OpenAI 우선
+        if openai_client:
+            try:
+                system_prompt = (
+                    "너는 초보자 친화적인 금융 튜터다. "
+                    "질문에 대해 3~5문장으로 간결히 한국어로 설명하고, 투자 자문은 하지 말아라. "
+                    "필요 시 간단한 예시 1개를 들어라."
+                )
+                resp = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": question}
+                    ],
+                    temperature=0.2,
+                    max_tokens=300,
+                )
+                answer = (resp.choices[0].message.content or "").strip()
+                return jsonify({'answer': answer})
+            except Exception as e:
+                print(f"[WARN] OpenAI QA 실패: {e}")
+
+        # 2) Gemini (키가 있을 때)
+        if GEMINI_API_KEY:
+            try:
+                url = (
+                    "https://generativelanguage.googleapis.com/v1beta/models/"
+                    "gemini-1.5-flash:generateContent"
+                    f"?key={GEMINI_API_KEY}"
+                )
+                payload = {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [{
+                                "text": (
+                                    "너는 초보자 친화적인 금융 튜터다. "
+                                    "질문에 대해 3~5문장으로 간결히 한국어로 설명하고, 투자 자문은 하지 말아라. "
+                                    "필요 시 간단한 예시 1개를 들어라.\n\n질문: " + question
+                                )
+                            }]
+                        }
+                    ]
+                }
+                r = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=15)
+                r.raise_for_status()
+                data_json = r.json()
+                candidates = data_json.get("candidates", [])
+                answer = ""
+                if candidates:
+                    for part in candidates[0].get("content", {}).get("parts", []):
+                        if "text" in part:
+                            answer += part["text"]
+                return jsonify({'answer': (answer or "").strip()})
+            except Exception as e:
+                print(f"[WARN] Gemini QA 실패: {e}")
+
+        # 3) 최종 폴백: 간단 응답
+        return jsonify({'answer': '금융 기본 개념 질문은 가능합니다. 조금 더 구체적으로 물어봐 주세요. 예: "매수가가 뭐야?", "PER 의미 알려줘"'})
+    except Exception as e:
+        print(f'[ERROR] finance_qa 오류: {e}')
+        return jsonify({'answer': ''})
 @app.route('/api/market-indices/<market>', methods=['GET'])
 def get_market_indices(market):
     """국내/미국 주가지수 데이터 반환"""
@@ -2309,6 +2510,8 @@ def health():
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    print('Python 서버가 포트 5000에서 실행 중입니다.')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.getenv('PORT', 5000))
+    debug_mode = os.getenv('FLASK_ENV') != 'production'
+    print(f'Python 서버가 포트 {port}에서 실행 중입니다. (디버그: {debug_mode})')
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
 

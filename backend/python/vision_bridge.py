@@ -15,10 +15,34 @@ try:
 except ImportError:  # pragma: no cover - 설치 누락 시 호출 영역에서 처리
     genai = None
 
-# 환경 변수 로드 (프로젝트 루트 .env)
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"))
+# 환경 변수 로드
+# 1) backend/.env를 우선 로드 (이 값을 우선시)
+# 2) 루트 .env도 로드(있다면)하되, 기본값 보전(override=False)
+_PY_DIR = os.path.dirname(__file__)
+_BACKEND_DIR = os.path.abspath(os.path.join(_PY_DIR, os.pardir))
+_ROOT_DIR = os.path.abspath(os.path.join(_BACKEND_DIR, os.pardir))
+
+# backend/.env → 우선 로드
+load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
+# 루트 .env → 선택적 로드(이미 설정된 값은 유지)
+load_dotenv(os.path.join(_ROOT_DIR, ".env"), override=False)
 
 logger = logging.getLogger(__name__)
+
+# 배포 환경: service-account.json을 환경변수에서 생성
+if os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON'):
+    import json
+    import tempfile
+    try:
+        service_account_info = json.loads(os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON'))
+        # 임시 파일로 저장
+        temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json')
+        json.dump(service_account_info, temp_file)
+        temp_file.close()
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_file.name
+        logger.info(f"Service account credentials loaded from environment variable")
+    except Exception as e:
+        logger.error(f"Failed to load service account from env var: {e}")
 
 # pic_me에서 개선된 프롬프트
 GEMINI_JSON_GUIDE = """{
@@ -97,6 +121,17 @@ _ALLOWED_MARKETS = {"KRX", "KOSDAQ", "KOSPI", "NASDAQ", "NYSE", "TSE"}
 _HOLDING_CACHE: Dict[str, Dict[str, Any]] = {}
 _HOLDING_CACHE_MAX = 256
 
+# --------- 성능: 클라이언트/모델 캐시 ---------
+_VISION_CLIENT: Optional[vision.ImageAnnotatorClient] = None
+_GENAI_CONFIGURED: bool = False
+_GENAI_AVAILABLE_MODELS: Optional[List[str]] = None
+
+def _get_vision_client() -> vision.ImageAnnotatorClient:
+    global _VISION_CLIENT
+    if _VISION_CLIENT is None:
+        _VISION_CLIENT = vision.ImageAnnotatorClient()
+    return _VISION_CLIENT
+
 
 class VisionGeminiError(Exception):
     """Vision 또는 Gemini 호출 실패"""
@@ -140,20 +175,24 @@ def prepare_gemini_client(api_key: Optional[str] = None, selected_model: Optiona
     if not key_to_use:
         return None, None, [], "GEMINI_API_KEY 환경 변수가 설정되지 않았습니다."
 
-    genai.configure(api_key=key_to_use)
+    global _GENAI_CONFIGURED, _GENAI_AVAILABLE_MODELS
+    if not _GENAI_CONFIGURED:
+        genai.configure(api_key=key_to_use)
+        _GENAI_CONFIGURED = True
 
-    try:
-        available_models = [m.name for m in genai.list_models()
-                            if 'generateContent' in m.supported_generation_methods]
-        available_models_clean = [m.replace('models/', '') for m in available_models]
-    except Exception:
-        available_models_clean = []
+    if _GENAI_AVAILABLE_MODELS is None:
+        try:
+            available_models = [m.name for m in genai.list_models()
+                                if 'generateContent' in m.supported_generation_methods]
+            _GENAI_AVAILABLE_MODELS = [m.replace('models/', '') for m in available_models]
+        except Exception:
+            _GENAI_AVAILABLE_MODELS = []
 
-    model_names = get_candidate_models(selected_model, available_models_clean)
+    model_names = get_candidate_models(selected_model, _GENAI_AVAILABLE_MODELS or [])
     if not model_names:
         return None, None, [], "사용 가능한 모델을 찾을 수 없습니다."
 
-    return genai, selected_model, available_models_clean, None
+    return genai, selected_model, (_GENAI_AVAILABLE_MODELS or []), None
 
 
 def extract_json_from_response_text(response_text: str) -> Tuple[Optional[Dict], Optional[str]]:
@@ -640,7 +679,30 @@ def _call_gemini_with_image(image_bytes: bytes, api_key: Optional[str] = None, s
     return result, used_model, None
 
 
-def analyze_product_from_image(image_bytes: bytes) -> Dict:
+def _maybe_downscale_image(image_bytes: bytes, max_px: int = 1280, quality: int = 85) -> bytes:
+    """큰 이미지를 다운스케일해 전송/분석 시간을 단축"""
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(image_bytes))
+        im = im.convert("RGB")
+        w, h = im.size
+        if max(w, h) <= max_px:
+            return image_bytes
+        if w >= h:
+            new_w = max_px
+            new_h = int(h * (max_px / float(w)))
+        else:
+            new_h = max_px
+            new_w = int(w * (max_px / float(h)))
+        im = im.resize((new_w, new_h))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=quality, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return image_bytes
+
+
+def analyze_product_from_image(image_bytes: bytes, *, enrich: bool = True) -> Dict:
     """
     Vision API + Gemini(텍스트) 기반으로 제품/브랜드 정보를 추출한다.
     실패 시 Gemini 직접 이미지 분석 결과를 함께 반환한다.
@@ -654,16 +716,27 @@ def analyze_product_from_image(image_bytes: bytes) -> Dict:
         }
     """
 
-    client = vision.ImageAnnotatorClient()
-    image = vision_types.Image(content=image_bytes)
-    features = [
-        {"type_": vision_types.Feature.Type.LABEL_DETECTION},
-        {"type_": vision_types.Feature.Type.TEXT_DETECTION},
-        {"type_": vision_types.Feature.Type.LOGO_DETECTION},
-        {"type_": vision_types.Feature.Type.OBJECT_LOCALIZATION},
-    ]
+    # 성능: 큰 이미지는 축소하여 전송
+    image_bytes_proc = _maybe_downscale_image(image_bytes)
 
-    vision_response = client.annotate_image({"image": image, "features": features})
+    client = _get_vision_client()
+    image = vision_types.Image(content=image_bytes_proc)
+
+    # 빠른 모드(enrich=False)에서는 가벼운 기능만 사용하여 응답 단축
+    if not enrich:
+        features = [
+            {"type_": vision_types.Feature.Type.LABEL_DETECTION},
+            {"type_": vision_types.Feature.Type.OBJECT_LOCALIZATION},
+        ]
+    else:
+        features = [
+            {"type_": vision_types.Feature.Type.LABEL_DETECTION},
+            {"type_": vision_types.Feature.Type.TEXT_DETECTION},
+            {"type_": vision_types.Feature.Type.LOGO_DETECTION},
+            {"type_": vision_types.Feature.Type.OBJECT_LOCALIZATION},
+        ]
+
+    vision_response = client.annotate_image({"image": image, "features": features}, timeout=6.0)
     summary = _summarize_vision_response(vision_response)
 
     # API 키는 환경 변수에서 가져옴
@@ -694,8 +767,9 @@ def analyze_product_from_image(image_bytes: bytes) -> Dict:
     fallback_result = None
     used_fallback = False
 
-    if primary_error or not primary_data:
-        fallback_data, fallback_model, fallback_error = _call_gemini_with_image(image_bytes, api_key=api_key, selected_model=selected_model)
+    if (primary_error or not primary_data) and enrich:
+        # 빠른 모드에서는 이미지 직접분석 폴백을 생략하여 응답 시간 단축
+        fallback_data, fallback_model, fallback_error = _call_gemini_with_image(image_bytes_proc, api_key=api_key, selected_model=selected_model)
         fallback_result = {
             "model": fallback_model,
             "object": None,
@@ -725,62 +799,63 @@ def analyze_product_from_image(image_bytes: bytes) -> Dict:
         "used_fallback": used_fallback,
     }
 
-    # 보강 정보 추가 (개발 단계에서 확인용)
-    # primary 또는 fallback 중 성공한 결과 사용
-    base_data = primary_data if primary_data else fallback_data
-    if base_data:
-        # 1) 지주회사 정보 보강
-        try:
-            enriched = augment_with_holding_info(
-                base_data,
-                resolver=resolve_holding_company,
-                api_key=api_key,
-                selected_model=selected_model,
-                brand_candidates=None,
-            )
-            if enriched and enriched.get("holding_company"):
-                final_result["holding_company"] = {
-                    "holding_company": enriched.get("holding_company"),
-                    "holding_market": enriched.get("holding_market"),
-                    "holding_ticker": enriched.get("holding_ticker"),
-                    "holding_sources": enriched.get("holding_sources", []),
-                    "holding_confidence": enriched.get("holding_confidence"),
-                }
-        except Exception as e:
-            logger.warning("지주회사 보강 실패: %s", str(e))
-
-        # 2) 밸류체인 공급사 제안 (최대 2개)
-        try:
-            vc = suggest_value_chain_suppliers(
-                object_name=base_data.get("object"),
-                brand=base_data.get("brand"),
-                text_hint=summary[:500] if summary else None,
-                supplier_candidates=None,
-                api_key=api_key,
-                selected_model=selected_model,
-                top_k=2,
-            )
-            if vc:
-                final_result["value_chain"] = vc
-        except Exception as e:
-            logger.warning("밸류체인 제안 실패: %s", str(e))
-
-        # 3) 관련 상장사 제안 (최대 3개)
-        try:
-            def _is_null(v):
-                return (v is None) or (str(v).strip() == "") or (str(v).lower() == "null")
-            if not (_is_null(base_data.get('object')) and _is_null(base_data.get('brand')) and _is_null(base_data.get('company'))):
-                related = suggest_related_public_companies(
-                    object_name=base_data.get("object"),
-                    brand=base_data.get("brand"),
+    # 보강 정보는 느리므로, 요청 플래그(enrich)에 따라 비활성화 가능
+    if enrich:
+        # primary 또는 fallback 중 성공한 결과 사용
+        base_data = primary_data if primary_data else fallback_data
+        if base_data:
+            # 1) 지주회사 정보 보강
+            try:
+                enriched = augment_with_holding_info(
+                    base_data,
+                    resolver=resolve_holding_company,
                     api_key=api_key,
                     selected_model=selected_model,
-                    top_k=3,
+                    brand_candidates=None,
                 )
-                if related and related.get("companies"):
-                    final_result["related_public_companies"] = related.get("companies")
-        except Exception as e:
-            logger.warning("관련 상장사 제안 실패: %s", str(e))
+                if enriched and enriched.get("holding_company"):
+                    final_result["holding_company"] = {
+                        "holding_company": enriched.get("holding_company"),
+                        "holding_market": enriched.get("holding_market"),
+                        "holding_ticker": enriched.get("holding_ticker"),
+                        "holding_sources": enriched.get("holding_sources", []),
+                        "holding_confidence": enriched.get("holding_confidence"),
+                    }
+            except Exception as e:
+                logger.warning("지주회사 보강 실패: %s", str(e))
+
+            # 2) 밸류체인 공급사 제안 (최대 2개)
+            try:
+                vc = suggest_value_chain_suppliers(
+                    object_name=base_data.get("object"),
+                    brand=base_data.get("brand"),
+                    text_hint=summary[:500] if summary else None,
+                    supplier_candidates=None,
+                    api_key=api_key,
+                    selected_model=selected_model,
+                    top_k=2,
+                )
+                if vc:
+                    final_result["value_chain"] = vc
+            except Exception as e:
+                logger.warning("밸류체인 제안 실패: %s", str(e))
+
+            # 3) 관련 상장사 제안 (최대 3개)
+            try:
+                def _is_null(v):
+                    return (v is None) or (str(v).strip() == "") or (str(v).lower() == "null")
+                if not (_is_null(base_data.get('object')) and _is_null(base_data.get('brand')) and _is_null(base_data.get('company'))):
+                    related = suggest_related_public_companies(
+                        object_name=base_data.get("object"),
+                        brand=base_data.get("brand"),
+                        api_key=api_key,
+                        selected_model=selected_model,
+                        top_k=3,
+                    )
+                    if related and related.get("companies"):
+                        final_result["related_public_companies"] = related.get("companies")
+            except Exception as e:
+                logger.warning("관련 상장사 제안 실패: %s", str(e))
 
     return final_result
 

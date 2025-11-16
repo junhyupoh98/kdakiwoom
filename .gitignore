@@ -1,48 +1,47 @@
-# Dependencies
-node_modules/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-
-# Cache
-cache/
-*.zip
-*.cache
-
-# Environment variables
+# 환경 변수 및 시크릿
 .env
-.env.local
-.env.*.local
-.envrc
-.venv/
+backend/.env
+*.json
+!package.json
+!package-lock.json
+!backend/node/stock-mapping.json
+!vercel.json
+!render.yaml
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 캐시
+cache/
+.cache/
 
 # OS
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
-# Logs
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# 로그
 *.log
-logs/
 
-# Build
-dist/
-build/
-*.egg-info/
-
-# Temporary files
+# 임시 파일
 *.tmp
-*.temp
-
-# Sensitive credentials
-my-project-41019-475914-bd9a8d61852f.json
-vision/my-project-41019-475914-bd9a8d61852f.json
-gen-lang-client-0148464155-c0c4027f6389.json
+temp/
