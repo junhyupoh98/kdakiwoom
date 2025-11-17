@@ -68,7 +68,7 @@ FLASK_ENV=production
 GOOGLE_SERVICE_ACCOUNT_JSON=여기에_service-account.json_파일_내용_전체_복사
 
 # Gemini API
-GEMINI_API_KEY=AIzaSyCg_cFR00LmfU2lUx5RuqOEm8lH26bvO88
+GEMINI_API_KEY=your_actual_gemini_api_key_here
 
 # OpenAI API
 OPENAI_API_KEY=sk-proj-...
