@@ -56,6 +56,8 @@ const MARKET_ALIAS_MAP = {
 };
 
 const SUPPORTED_MARKETS = new Set(['NASDAQ', 'NYSE', 'KRX', 'XETRA', 'HKEX', 'SSE', 'SZSE', 'TWSE']);
+// 실제로 주가 데이터를 가져올 수 있는 시장 (한국 + 미국만)
+const DATA_AVAILABLE_MARKETS = new Set(['NASDAQ', 'NYSE', 'KRX', 'KOSPI', 'KOSDAQ']);
 
 // 이미지 업로드 처리
 async function handleImageFile(file) {
@@ -74,7 +76,11 @@ async function handleImageFile(file) {
         removeMessage(loadingId);
 
         if (quickResult) {
-            const renderCtx = addVisionPrimaryMessage(quickResult); // 핵심 필드 즉시 표시
+            // ===== 이미지 분석 결과 카드 숨김 (임시) =====
+            // 사용자에게 보여주지 않기 위해 주석 처리 (나중에 필요하면 주석 해제)
+            // const renderCtx = addVisionPrimaryMessage(quickResult); // 핵심 필드 즉시 표시
+            const renderCtx = { enrichmentContainerId: null }; // 임시 더미 객체
+            // ============================================
 
             // 핵심 결과 기반으로 종목 자동 로드(차트/요약 카드 표시)
             let stockCandidateQuick = null;
@@ -100,7 +106,49 @@ async function handleImageFile(file) {
                               String(primaryMarket).toLowerCase() === 'unlisted';
             
             if (!stockCandidateQuick && isPrivate) {
-                investableStockLoadingId = addLoadingMessage('직접투자 가능 종목 분석중...');
+                // 비상장 안내 챗봇 메시지 - 분석 정보 포함
+                console.log('🔍 비상장 분석 결과:', { primary, fallback: quickResult?.fallback });
+                
+                // 정보 추출 (primary와 fallback 모두 확인)
+                const source = primary || quickResult?.fallback || {};
+                const companyName = source.company || source.company_name || '';
+                const brandName = source.brand || source.brand_name || '';
+                const mainObject = source.primary_object || (source.objects && source.objects.length > 0 ? source.objects[0] : '') || '';
+                
+                console.log('📋 추출된 정보:', { companyName, brandName, mainObject });
+                
+                // 분석 정보 문자열 생성
+                let analysisInfo = '<br>';
+                let hasInfo = false;
+                
+                if (mainObject) {
+                    analysisInfo += `🔍 <strong>인식된 제품:</strong> ${mainObject}<br>`;
+                    hasInfo = true;
+                }
+                if (brandName) {
+                    analysisInfo += `🏷️ <strong>브랜드:</strong> ${brandName}<br>`;
+                    hasInfo = true;
+                }
+                if (companyName) {
+                    analysisInfo += `🏢 <strong>제조사:</strong> ${companyName}<br>`;
+                    hasInfo = true;
+                }
+                
+                // 정보가 하나도 없으면 기본 메시지
+                if (!hasInfo) {
+                    analysisInfo = '<br>🏢 <strong>비상장 기업</strong>을(를) 찾았어요!<br>';
+                }
+                
+                addMessage(
+                    `📸 이미지 분석 완료!` +
+                    analysisInfo +
+                    `<br>하지만 이 기업은 <strong>비상장</strong>이라 직접 투자가 어려워요. 😔<br><br>` +
+                    `💡 지금 관련된 상장 지주회사나 투자 가능한 종목을 찾고 있어요!`,
+                    'bot'
+                );
+                
+                // 로딩 메시지 추가
+                investableStockLoadingId = addLoadingMessage('투자 가능 종목 검색중');
             }
 
             // 2단계: 보강 정보를 백그라운드로 요청해서 UI 갱신
@@ -110,7 +158,9 @@ async function handleImageFile(file) {
                         // 전역 변수에 비전 결과 저장 (관련종목에서 활용)
                         lastVisionResult = fullResult;
                         
-                        updateVisionEnrichmentMessage(renderCtx.enrichmentContainerId, fullResult);
+                        // ===== 이미지 분석 결과 카드 업데이트 숨김 (임시) =====
+                        // updateVisionEnrichmentMessage(renderCtx.enrichmentContainerId, fullResult);
+                        // =================================================
                         
                         // 빠른 모드에서 메인카드를 못 띄웠고, 지주회사 정보가 있으면 메인카드 띄우기
                         if (!stockCandidateQuick && fullResult.holding_company) {
@@ -123,9 +173,81 @@ async function handleImageFile(file) {
                                         investableStockLoadingId = null;
                                     }
                                     
-                                    const stockData = await fetchStockData(stockCandidateFull.searchTicker);
-                                    if (stockData) {
-                                        addStockMessage(stockData);
+                                    const holdingCompany = fullResult.holding_company?.name || stockCandidateFull.company;
+                                    const holdingMarket = stockCandidateFull.market;
+                                    const holdingTicker = fullResult.holding_company?.ticker || stockCandidateFull.ticker;
+                                    
+                                    // 시장이 데이터 지원 가능한지 확인
+                                    const isDataAvailable = DATA_AVAILABLE_MARKETS.has(holdingMarket);
+                                    
+                                    if (!isDataAvailable) {
+                                        // 지원하지 않는 시장인 경우
+                                        const marketName = holdingMarket === 'XETRA' ? '독일' :
+                                                          holdingMarket === 'HKEX' ? '홍콩' :
+                                                          holdingMarket === 'SSE' ? '중국 상해' :
+                                                          holdingMarket === 'SZSE' ? '중국 심천' :
+                                                          holdingMarket === 'TWSE' ? '대만' : holdingMarket;
+                                        
+                                        addMessage(
+                                            `✅ 투자 가능한 종목을 찾았어요!<br><br>` +
+                                            `<strong>${holdingCompany}</strong> (${holdingTicker})<br>` +
+                                            `거래소: ${marketName}<br><br>` +
+                                            `😔 하지만 현재 <strong>${marketName} 증권거래소</strong>의 주가 정보는 지원하지 않습니다.<br><br>` +
+                                            `💡 현재 지원 시장: 한국(KRX), 미국(NASDAQ, NYSE)`,
+                                            'bot'
+                                        );
+                                        
+                                        // 관련 상장사가 있으면 표시
+                                        const relatedCompanies = fullResult.related_public_companies || [];
+                                        if (relatedCompanies.length > 0) {
+                                            // 한국/미국 시장만 필터링
+                                            const availableCompanies = relatedCompanies.filter(c => 
+                                                DATA_AVAILABLE_MARKETS.has(c.market)
+                                            );
+                                            
+                                            if (availableCompanies.length > 0) {
+                                                addMessage(
+                                                    `대신 제품과 관련된 상장사를 확인해보세요! 👇`,
+                                                    'bot'
+                                                );
+                                                addRelatedCompanyButtons(availableCompanies);
+                                            }
+                                        }
+                                    } else {
+                                        // 지원하는 시장인 경우 - 정상 처리
+                                        addMessage(
+                                            `✅ 투자 가능한 종목을 찾았어요!<br><br>` +
+                                            `<strong>${holdingCompany}</strong>의 주가 정보를 보여드릴게요. 📈`,
+                                            'bot'
+                                        );
+                                        
+                                        const stockData = await fetchStockData(stockCandidateFull.searchTicker);
+                                        if (stockData) {
+                                            addStockMessage(stockData);
+                                        } else {
+                                            // fetchStockData 실패 시
+                                            addMessage(
+                                                `😔 죄송합니다. <strong>${holdingCompany}</strong>의 주가 정보를 가져올 수 없습니다.<br><br>` +
+                                                `잠시 후 다시 시도해주세요.`,
+                                                'bot'
+                                            );
+                                            
+                                            // 관련 상장사가 있으면 대안 제시
+                                            const relatedCompanies = fullResult.related_public_companies || [];
+                                            if (relatedCompanies.length > 0) {
+                                                const availableCompanies = relatedCompanies.filter(c => 
+                                                    DATA_AVAILABLE_MARKETS.has(c.market)
+                                                );
+                                                
+                                                if (availableCompanies.length > 0) {
+                                                    addMessage(
+                                                        `대신 제품과 관련된 상장사를 확인해보세요! 👇`,
+                                                        'bot'
+                                                    );
+                                                    addRelatedCompanyButtons(availableCompanies);
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             } catch (e) {
@@ -136,6 +258,42 @@ async function handleImageFile(file) {
                         // 지주회사 정보도 없으면 로딩 메시지 제거
                         if (investableStockLoadingId) {
                             removeMessage(investableStockLoadingId);
+                            
+                            // 지주회사를 찾지 못한 경우 안내 메시지
+                            if (!fullResult.holding_company || !getVisionStockCandidate(fullResult)) {
+                                // 관련 상장사가 있는지 확인
+                                const relatedCompanies = fullResult.related_public_companies || [];
+                                
+                                if (relatedCompanies.length > 0) {
+                                    // 한국/미국 시장만 필터링
+                                    const availableCompanies = relatedCompanies.filter(c => 
+                                        DATA_AVAILABLE_MARKETS.has(c.market)
+                                    );
+                                    
+                                    if (availableCompanies.length > 0) {
+                                        addMessage(
+                                            `😔 직접 투자 가능한 지주회사를 찾지 못했어요.<br><br>` +
+                                            `하지만 제품과 관련된 상장사를 찾았어요! 원하시는 종목을 선택해주세요. 👇`,
+                                            'bot'
+                                        );
+                                        
+                                        // 관련 상장사 선택 버튼 표시 (한국/미국만)
+                                        addRelatedCompanyButtons(availableCompanies);
+                                    } else {
+                                        addMessage(
+                                            `😔 아쉽게도 직접 투자 가능한 상장 종목을 찾지 못했어요.<br><br>` +
+                                            `현재 한국(KRX)과 미국(NASDAQ, NYSE) 시장만 지원합니다.`,
+                                            'bot'
+                                        );
+                                    }
+                                } else {
+                                    addMessage(
+                                        `😔 아쉽게도 직접 투자 가능한 상장 종목을 찾지 못했어요.<br><br>` +
+                                        `하지만 분석 결과는 아래에서 확인하실 수 있어요!`,
+                                        'bot'
+                                    );
+                                }
+                            }
                         }
                     }
                 })
@@ -144,6 +302,11 @@ async function handleImageFile(file) {
                     // 오류 발생 시 로딩 메시지 제거
                     if (investableStockLoadingId) {
                         removeMessage(investableStockLoadingId);
+                        addMessage(
+                            `❌ 종목 검색 중 오류가 발생했어요.<br><br>` +
+                            `잠시 후 다시 시도해주세요!`,
+                            'bot'
+                        );
                     }
                 });
         } else {
@@ -873,7 +1036,7 @@ function addFinancialMessage(companyName, symbol, financialData) {
             <div class="financial-chart-slider">
                 <div class="chart-slider-tabs">
                     <button class="chart-slider-tab active" data-chart="financial">재무제표</button>
-                    ${hasSegments ? `<button class="chart-slider-tab" data-chart="segment">사업 부문별 매출</button>` : ''}
+                    ${hasSegments ? `<button class="chart-slider-tab" data-chart="segment">사업부문<br>매출</button>` : ''}
                     <button class="chart-slider-tab" data-chart="earnings" data-symbol="${symbol}">어닝콜</button>
                 </div>
                 <div class="chart-slider-container">
@@ -1143,7 +1306,7 @@ function renderSegmentChart(canvasId, segments, currency) {
             // 한국식/글로벌 단위 변환
             let revenueText;
             if (currency === 'KRW') {
-                // 한국 원화: FMP API는 억원 단위로 반환 (115.59 = 115.59억원)
+                // 한국 원화: 억원 단위로 계산
                 const revenueInBillionKRW = totalRevenue; // 이미 억원 단위
                 const revenueInTrillionKRW = revenueInBillionKRW / 10000; // 조원으로 변환 (1조 = 10,000억)
                 
@@ -1159,21 +1322,28 @@ function renderSegmentChart(canvasId, segments, currency) {
                 }
             } else {
                 // 달러 등: 한국식 단위로 표시
-                // FMP API는 백만 달러 단위로 반환 (예: 394328 = 394,328M = $394.3B = $3,943억 달러)
+                // ChromaDB에서 segment revenue는 달러 단위로 반환 (예: 102466000000 USD = $1,024.66억)
                 const currencySymbol = currency === 'USD' ? '$' : currency;
-                const revenueInBillionUSD = totalRevenue / 1000; // Billion 달러 단위
-                const revenueInHundredMillionUSD = revenueInBillionUSD * 10; // 억 달러 단위 (1B = 10억)
+                
+                // totalRevenue가 달러 단위라고 가정
+                // 1억 달러 = 100,000,000 USD = 10^8 USD
+                const revenueInHundredMillionUSD = totalRevenue / 100000000; // 달러 / 1억 = 억 달러
                 
                 if (revenueInHundredMillionUSD >= 10000) {
-                    // 1조 달러 이상 (10,000억 달러)
-                    revenueText = `${currencySymbol}${(revenueInHundredMillionUSD / 10000).toFixed(1)}조`;
+                    // 1조 달러 이상 (10,000억 달러 = 1조)
+                    const revenueInTrillionUSD = revenueInHundredMillionUSD / 10000;
+                    revenueText = `${currencySymbol}${revenueInTrillionUSD.toFixed(2)}조`;
                 } else if (revenueInHundredMillionUSD >= 1) {
                     // 1억 달러 이상
-                    const formatted = Math.round(revenueInHundredMillionUSD).toLocaleString('ko-KR');
+                    const formatted = revenueInHundredMillionUSD.toLocaleString('ko-KR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
                     revenueText = `${currencySymbol}${formatted}억`;
                 } else {
-                    // 1억 달러 미만
-                    const formatted = Math.round(totalRevenue).toLocaleString('ko-KR');
+                    // 1억 달러 미만 (백만 달러 단위로 표시)
+                    const revenueInMillionUSD = totalRevenue / 1000000;
+                    const formatted = revenueInMillionUSD.toFixed(2);
                     revenueText = `${currencySymbol}${formatted}M`;
                 }
             }
@@ -2219,7 +2389,9 @@ function addMessage(text, sender) {
     contentDiv.className = 'message-content';
     
     if (typeof text === 'string') {
-        contentDiv.textContent = text;
+        // HTML 태그를 렌더링하기 위해 innerHTML 사용
+        // 줄바꿈(\n)을 <br>로 변환
+        contentDiv.innerHTML = text.replace(/\n/g, '<br>');
     } else {
         contentDiv.appendChild(text);
     }
@@ -2236,13 +2408,24 @@ function addMessage(text, sender) {
 // 로딩 메시지 추가
 function addLoadingMessage(text = '답변 중...') {
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'message bot-message';
+    messageDiv.className = 'message bot-message loading-message';
     const messageId = `loading-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     messageDiv.id = messageId;
     
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    contentDiv.textContent = text;
+    
+    // 텍스트와 물결 애니메이션
+    contentDiv.innerHTML = `
+        <span>${text}</span>
+        <span class="loading-spinner">
+            <span class="wave-spinner">
+                <span class="wave-dot"></span>
+                <span class="wave-dot"></span>
+                <span class="wave-dot"></span>
+            </span>
+        </span>
+    `;
     
     messageDiv.appendChild(contentDiv);
     chatMessages.appendChild(messageDiv);
@@ -2305,6 +2488,97 @@ function addStockSelectionButtons(stocks) {
                 removeMessage(loadingId);
                 addMessage('주가 정보를 가져오는 중 오류가 발생했습니다.', 'bot');
                 console.error('오류:', error);
+            } finally {
+                // 버튼 다시 활성화
+                button.disabled = false;
+                button.style.opacity = '1';
+            }
+        });
+        
+        buttonsContainer.appendChild(button);
+    });
+    
+    contentDiv.appendChild(title);
+    contentDiv.appendChild(buttonsContainer);
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+    
+    // 스크롤을 맨 아래로
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// 관련 상장사 선택 버튼 표시 (제품 관련 상장사)
+function addRelatedCompanyButtons(relatedCompanies) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message bot-message';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content related-company-content';
+    
+    const title = document.createElement('div');
+    title.className = 'related-company-title';
+    title.innerHTML = '<strong>🔎 제품 관련 상장사</strong>';
+    
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.className = 'related-company-buttons';
+    
+    relatedCompanies.forEach((company, index) => {
+        const button = document.createElement('button');
+        button.className = 'related-company-btn';
+        
+        // 회사 정보 표시
+        const companyName = company.company || company.name || '알 수 없음';
+        const market = company.market || '';
+        const ticker = company.ticker || '';
+        
+        button.innerHTML = `
+            <div class="company-number">${index + 1}.</div>
+            <div class="company-info">
+                <div class="company-name">${companyName}</div>
+                <div class="company-meta">${market}${market && ticker ? ' · ' : ''}${ticker}</div>
+            </div>
+        `;
+        
+        // 티커 정보 저장
+        button.dataset.ticker = ticker;
+        button.dataset.market = market;
+        button.dataset.company = companyName;
+        
+        button.addEventListener('click', async () => {
+            // 버튼 비활성화
+            button.disabled = true;
+            button.style.opacity = '0.6';
+            
+            // 로딩 메시지 표시
+            const loadingId = addLoadingMessage(`${companyName} 정보 로딩중`);
+            
+            try {
+                // 티커로 주가 정보 검색
+                let searchTicker = ticker;
+                
+                // 한국 시장이면 KRX 형식으로 변환
+                if (market === 'KRX' || market === 'KOSPI' || market === 'KOSDAQ') {
+                    searchTicker = ticker;
+                } else if (market === 'NASDAQ' || market === 'NYSE') {
+                    // 미국 시장은 그대로 사용
+                    searchTicker = ticker;
+                }
+                
+                const stockData = await fetchStockData(searchTicker);
+                
+                // 로딩 메시지 제거
+                removeMessage(loadingId);
+                
+                if (stockData) {
+                    // 주가 정보 표시
+                    addStockMessage(stockData);
+                } else {
+                    addMessage(`"${companyName}" 종목 정보를 찾을 수 없습니다. 😔`, 'bot');
+                }
+            } catch (error) {
+                removeMessage(loadingId);
+                addMessage('주가 정보를 가져오는 중 오류가 발생했습니다.', 'bot');
+                console.error('관련 상장사 로드 오류:', error);
             } finally {
                 // 버튼 다시 활성화
                 button.disabled = false;
@@ -2503,6 +2777,25 @@ async function addStockMessage(stockData) {
     }, 100);
     
     chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    // 빙고 체크 (메인카드가 표시된 후에 실행)
+    setTimeout(() => {
+        if (stockData && stockData.name) {
+            try {
+                console.log('🎯 빙고 체크 시도:', stockData.name, '(심볼:', stockData.symbol, ')');
+                const result = completeCompany(stockData.name);
+                if (result) {
+                    console.log('✅ 빙고 당첨!', stockData.name);
+                    // completeCompany 함수 내에서 이미 showBingoNotification 호출됨
+                } else {
+                    console.log('❌ 빙고 미체크:', stockData.name);
+                    // 빙고판에 없거나 이미 완성된 경우 알림 없음 (당첨일 때만 표시)
+                }
+            } catch (e) {
+                console.error('빙고 체크 오류:', e);
+            }
+        }
+    }, 300); // 메인카드가 렌더링된 후 약간의 딜레이
 }
 
 // 차트 렌더링
@@ -3078,6 +3371,147 @@ function checkIfFavorite(symbol) {
     return favorites.some(f => f.symbol === symbol);
 }
 
+// 관심종목 모달 열기
+function openFavoriteModal() {
+    const modal = document.getElementById('favoriteModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        renderFavoriteList();
+        
+        // Lucide 아이콘 초기화
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    }
+}
+
+// 관심종목 모달 닫기
+function closeFavoriteModal() {
+    const modal = document.getElementById('favoriteModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// 관심종목 리스트 렌더링
+function renderFavoriteList() {
+    const favoriteList = document.getElementById('favoriteList');
+    const favoriteCount = document.getElementById('favoriteCount');
+    
+    if (!favoriteList || !favoriteCount) return;
+    
+    // localStorage에서 찜한 종목 가져오기
+    const favorites = JSON.parse(localStorage.getItem('favoriteStocks') || '[]');
+    
+    // 개수 업데이트
+    favoriteCount.textContent = favorites.length;
+    
+    // 빈 목록 처리
+    if (favorites.length === 0) {
+        favoriteList.innerHTML = `
+            <div class="favorite-empty">
+                <i data-lucide="star" width="64" height="64"></i>
+                <div class="favorite-empty-title">관심종목이 없습니다</div>
+                <div class="favorite-empty-desc">종목 카드의 ⭐ 버튼을 눌러<br>관심종목을 추가해보세요!</div>
+            </div>
+        `;
+        
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        return;
+    }
+    
+    // 관심종목 리스트 HTML 생성
+    const listHTML = favorites.map(fav => `
+        <div class="favorite-item" data-symbol="${fav.symbol}">
+            <div class="favorite-item-left">
+                <div class="favorite-star-icon">⭐</div>
+                <div class="favorite-item-info">
+                    <div class="favorite-item-name">${fav.name}</div>
+                    <div class="favorite-item-symbol">${fav.symbol}</div>
+                </div>
+            </div>
+            <div class="favorite-item-actions">
+                <button class="favorite-delete-btn" data-symbol="${fav.symbol}" data-name="${fav.name}" title="삭제">
+                    <i data-lucide="trash-2" width="18" height="18"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    favoriteList.innerHTML = listHTML;
+    
+    // Lucide 아이콘 초기화
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+    
+    // 각 종목 클릭 이벤트
+    const favoriteItems = favoriteList.querySelectorAll('.favorite-item');
+    favoriteItems.forEach(item => {
+        item.addEventListener('click', async (e) => {
+            // 삭제 버튼 클릭 시 이벤트 전파 중지
+            if (e.target.closest('.favorite-delete-btn')) {
+                return;
+            }
+            
+            const symbol = item.dataset.symbol;
+            if (symbol) {
+                // 모달 닫기
+                closeFavoriteModal();
+                
+                // 채팅 페이지로 전환
+                const landingPage = document.getElementById('landingPage');
+                const chatPage = document.getElementById('chatPage');
+                if (landingPage && chatPage && landingPage.style.display !== 'none') {
+                    landingPage.style.display = 'none';
+                    chatPage.style.display = 'flex';
+                }
+                
+                // 종목 데이터 로드 및 표시
+                try {
+                    const stockData = await fetchStockData(symbol);
+                    if (stockData) {
+                        addStockMessage(stockData);
+                    }
+                } catch (error) {
+                    console.error('종목 데이터 로드 오류:', error);
+                    addMessage('종목 데이터를 불러올 수 없습니다.', 'bot');
+                }
+            }
+        });
+    });
+    
+    // 삭제 버튼 (수정: confirm 대신 바로 삭제)
+    const deleteButtons = favoriteList.querySelectorAll('.favorite-delete-btn');
+    deleteButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            
+            const symbol = btn.dataset.symbol;
+            const name = btn.dataset.name;
+            
+            console.log('🗑️ 삭제 버튼 클릭:', symbol, name);
+            console.log('✅ 관심종목에서 삭제 진행 (확인 없이 바로 삭제)');
+            
+            // 바로 삭제
+            removeFavoriteFromStorage(symbol);
+            
+            // 리스트 다시 렌더링
+            renderFavoriteList();
+            
+            console.log('✅ 삭제 완료 및 UI 업데이트');
+            
+            // 피드백 메시지
+            if (window.addMessage) {
+                addMessage(`"${name || symbol}"을(를) 관심종목에서 제거했습니다.`, 'bot');
+            }
+        });
+    });
+}
+
 // 억 단위로 포맷팅 (재무제표용)
 function formatNumberInHundredMillion(num, currency = 'KRW') {
     if (num === '-' || num === null || num === undefined) return '-';
@@ -3149,43 +3583,99 @@ document.addEventListener('DOMContentLoaded', () => {
     // 페이지 전환 관련 요소
     const landingPage = document.getElementById('landingPage');
     const chatPage = document.getElementById('chatPage');
+    const landingSearchHero = document.getElementById('landingSearchHero');
     const landingSearchBar = document.getElementById('landingSearchBar');
+    const landingSearchInput = document.getElementById('landingSearchInput');
+    const landingSearchSubmitBtn = document.getElementById('landingSearchSubmitBtn');
     const landingCameraFloatingButton = document.getElementById('landingCameraFloatingButton');
     const homeButton = document.getElementById('homeButton');
     
-    // 검색바 클릭 시 채팅 페이지로 전환
+    // 검색바 클릭 시 이벤트 전파 중지 (input 클릭 가능하도록)
     if (landingSearchBar) {
-        landingSearchBar.addEventListener('click', () => {
-            if (landingPage && chatPage) {
-                landingPage.style.display = 'none';
-                chatPage.style.display = 'flex';
-                // 입력창에 포커스
-                setTimeout(() => {
-                    const userInput = document.getElementById('userInput');
-                    if (userInput) {
-                        userInput.focus();
-                    }
-                }, 100);
+        landingSearchBar.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // input에 포커스
+            if (landingSearchInput && e.target !== landingSearchSubmitBtn) {
+                landingSearchInput.focus();
             }
         });
     }
     
-    // 랜딩 페이지 카메라 플로팅 버튼 클릭 시 이미지 선택 모달 열기
-    if (landingCameraFloatingButton) {
-        landingCameraFloatingButton.addEventListener('click', () => {
-            const landingPage = document.getElementById('landingPage');
-            const chatPage = document.getElementById('chatPage');
+    // 입력창 클릭 시에도 이벤트 전파 중지
+    if (landingSearchInput) {
+        landingSearchInput.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+    }
+    
+    // 보라색 배경 영역 클릭 시 채팅 페이지로 전환 (단순)
+    if (landingSearchHero) {
+        landingSearchHero.addEventListener('click', (e) => {
+            // 검색바나 그 내부 요소 클릭은 제외
+            const isSearchBarClick = e.target.closest('.landing-search-bar') !== null;
+            
+            if (!isSearchBarClick && (e.target === landingSearchHero || e.target.classList.contains('search-hero-title'))) {
             if (landingPage && chatPage) {
                 landingPage.style.display = 'none';
                 chatPage.style.display = 'flex';
-                // 이미지 선택 모달 열기
+                    setTimeout(() => {
+                        if (userInput) {
+                            userInput.focus();
+                        }
+                    }, 100);
+                }
+            }
+        });
+    }
+    
+    // 검색 제출 함수
+    function submitLandingSearch() {
+        const query = landingSearchInput ? landingSearchInput.value.trim() : '';
+        if (query && landingPage && chatPage) {
+            // 채팅 페이지로 전환
+                landingPage.style.display = 'none';
+                chatPage.style.display = 'flex';
+            // 검색 실행
                 setTimeout(() => {
-                    const imageSelectModal = document.getElementById('imageSelectModal');
-                    if (imageSelectModal) {
-                        imageSelectModal.style.display = 'flex';
+                if (userInput) {
+                    userInput.value = query;
+                    sendMessage();
                     }
                 }, 100);
+        } else if (landingPage && chatPage) {
+            // 빈 입력이면 그냥 채팅 페이지로 전환
+            landingPage.style.display = 'none';
+            chatPage.style.display = 'flex';
+            setTimeout(() => {
+                if (userInput) {
+                    userInput.focus();
+                }
+            }, 100);
+        }
+    }
+    
+    // 검색 버튼 클릭 시
+    if (landingSearchSubmitBtn) {
+        landingSearchSubmitBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            submitLandingSearch();
+        });
+    }
+    
+    // Enter 키 입력 시
+    if (landingSearchInput) {
+        landingSearchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                submitLandingSearch();
             }
+        });
+    }
+    
+    // 랜딩 페이지 카메라 플로팅 버튼 클릭 시 카메라 모달 열기
+    if (landingCameraFloatingButton) {
+        landingCameraFloatingButton.addEventListener('click', () => {
+            openCameraModal();
         });
     }
     
@@ -3313,7 +3803,9 @@ document.addEventListener('DOMContentLoaded', () => {
         cameraButton.addEventListener('click', () => {
             // TODO: 카메라 기능 구현
             console.log('카메라 버튼 클릭');
-            imageSelectModal.style.display = 'none';
+            if (imageSelectModal) {
+                imageSelectModal.style.display = 'none';
+            }
         });
     }
     
@@ -3723,47 +4215,8 @@ function getMockMarketIndices(market = 'kr') {
     }
 }
 
-function loadMarketIndices(market = 'kr') {
-    const container = document.getElementById('indexCardsContainer');
-    if (!container) return;
-    
-    const indices = getMockMarketIndices(market);
-    
-    // 지수 카드 생성
-    container.innerHTML = '';
-    indices.forEach(index => {
-        const card = createIndexCard(index);
-        container.appendChild(card);
-    });
-    
-    // Lucide 아이콘 초기화
-    if (typeof lucide !== 'undefined') {
-        lucide.createIcons();
-    }
-}
-
-// 지수 카드 생성 함수
-function createIndexCard(index) {
-    const card = document.createElement('div');
-    card.className = 'index-card';
-    
-    const change = index.change || 0;
-    const changePercent = index.changePercent || 0;
-    const isPositive = change > 0;
-    const isNegative = change < 0;
-    const changeClass = isPositive ? 'positive' : (isNegative ? 'negative' : 'neutral');
-    const changeSign = isPositive ? '+' : '';
-    
-    card.innerHTML = `
-        <div class="index-card-name">${index.name}</div>
-        <div class="index-card-value">${index.value.toLocaleString()}</div>
-        <div class="index-card-change ${changeClass}">
-            ${changeSign}${change.toLocaleString()}(${changeSign}${changePercent.toFixed(2)}%)
-            </div>
-        `;
-    
-    return card;
-}
+// Mock 버전 loadMarketIndices는 제거됨 (3649줄의 실시간 API 버전 사용)
+// Mock 버전 createIndexCard는 제거됨 (3683줄의 버전 사용)
 
 // 랭킹 종목 모크 데이터
 function getMockRankingStocks(type = 'popular') {
@@ -3799,6 +4252,50 @@ function getMockRankingStocks(type = 'popular') {
     };
     
     return stocks[type] || stocks.popular;
+}
+
+// 실시간 주가로 업데이트
+async function updateRankingStocksWithRealData(stocks) {
+    const updatedStocks = [];
+    
+    for (const stock of stocks) {
+        try {
+            let stockData;
+            
+            if (stock.isUs) {
+                // 해외 주식
+                const response = await fetch(`${API_BASE_URL}/stock/${stock.code}`);
+                if (response.ok) {
+                    stockData = await response.json();
+                }
+            } else {
+                // 한국 주식
+                const response = await fetch(`${API_BASE_URL}/kr-stock/${stock.code}`);
+                if (response.ok) {
+                    stockData = await response.json();
+                }
+            }
+            
+            if (stockData) {
+                // 실제 주가 데이터로 업데이트
+                updatedStocks.push({
+                    ...stock,
+                    price: stockData.price || stock.price,
+                    change: stockData.change || stock.change,
+                    changePercent: stockData.changePercent || stock.changePercent
+                });
+            } else {
+                // API 실패 시 기본값 유지
+                updatedStocks.push(stock);
+            }
+        } catch (error) {
+            console.error(`${stock.name} 주가 업데이트 실패:`, error);
+            // 오류 시 기본값 유지
+            updatedStocks.push(stock);
+        }
+    }
+    
+    return updatedStocks;
 }
 
 // 급등주 모크 데이터
@@ -3854,18 +4351,37 @@ function getMockMarketNews() {
     ];
 }
 
-// 랭킹 종목 로드
-function loadRankingStocks(type = 'popular') {
+// 랭킹 종목 로드 (실시간 주가 반영)
+async function loadRankingStocks(type = 'popular') {
     const container = document.getElementById('rankingList');
     if (!container) return;
     
-    const stocks = getMockRankingStocks(type);
+    // 로딩 표시
+    container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">로딩 중...</div>';
     
-    container.innerHTML = '';
-    stocks.forEach((stock, index) => {
-        const item = createRankingStockItem(stock, index + 1);
-        container.appendChild(item);
-    });
+    try {
+        // 고정된 종목 리스트 가져오기
+        const mockStocks = getMockRankingStocks(type);
+        
+        // 실시간 주가로 업데이트
+        const stocks = await updateRankingStocksWithRealData(mockStocks);
+        
+        // 렌더링
+        container.innerHTML = '';
+        stocks.forEach((stock, index) => {
+            const item = createRankingStockItem(stock, index + 1);
+            container.appendChild(item);
+        });
+    } catch (error) {
+        console.error('랭킹 로드 오류:', error);
+        // 오류 시 mock 데이터라도 표시
+        const stocks = getMockRankingStocks(type);
+        container.innerHTML = '';
+        stocks.forEach((stock, index) => {
+            const item = createRankingStockItem(stock, index + 1);
+            container.appendChild(item);
+        });
+    }
 }
 
 // 테마 로드
@@ -4074,15 +4590,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (landingPage && chatPage) {
                 chatPage.style.display = 'none';
                 landingPage.style.display = 'block';
-            }
-        });
-    }
-    
-    // 랜딩 페이지 카메라 플로팅 버튼 클릭 시
-    if (landingCameraFloatingButton) {
-        landingCameraFloatingButton.addEventListener('click', () => {
-            if (imageUploadInput) {
-                imageUploadInput.click();
             }
         });
     }
@@ -4307,6 +4814,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 카메라 모달 이벤트 리스너
     const cameraCloseBtn = document.getElementById('cameraCloseBtn');
     const cameraCaptureBtn = document.getElementById('cameraCaptureBtn');
+    const cameraAlbumBtn = document.getElementById('cameraAlbumBtn');
     
     if (cameraCloseBtn) {
         cameraCloseBtn.addEventListener('click', closeCameraModal);
@@ -4314,6 +4822,18 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (cameraCaptureBtn) {
         cameraCaptureBtn.addEventListener('click', capturePhoto);
+    }
+    
+    // 앨범 버튼 클릭 시 이미지 업로드 인풋 열기
+    if (cameraAlbumBtn) {
+        cameraAlbumBtn.addEventListener('click', () => {
+            // 카메라 모달 닫기
+            closeCameraModal();
+            // 이미지 업로드 인풋 트리거
+            if (imageUploadInput) {
+                imageUploadInput.click();
+            }
+        });
     }
 });
 
@@ -4388,49 +4908,13 @@ function capturePhoto() {
         return;
     }
     
+    // 캔버스 크기를 비디오 크기에 맞춤
+    cameraCanvas.width = cameraVideo.videoWidth;
+    cameraCanvas.height = cameraVideo.videoHeight;
+    
+    // 캔버스에 현재 비디오 프레임 그리기
     const context = cameraCanvas.getContext('2d');
-    
-    // 실제 비디오 크기
-    const videoWidth = cameraVideo.videoWidth;
-    const videoHeight = cameraVideo.videoHeight;
-    
-    // 화면에 표시되는 비디오 요소의 크기
-    const displayWidth = cameraVideo.clientWidth;
-    const displayHeight = cameraVideo.clientHeight;
-    
-    // 비디오와 디스플레이의 종횡비
-    const videoAspect = videoWidth / videoHeight;
-    const displayAspect = displayWidth / displayHeight;
-    
-    let sourceX = 0;
-    let sourceY = 0;
-    let sourceWidth = videoWidth;
-    let sourceHeight = videoHeight;
-    
-    // object-fit: cover 로직 - 화면에 보이는 영역만 계산
-    if (videoAspect > displayAspect) {
-        // 비디오가 더 넓음 - 좌우가 잘림
-        sourceWidth = videoHeight * displayAspect;
-        sourceX = (videoWidth - sourceWidth) / 2;
-    } else {
-        // 비디오가 더 높음 - 상하가 잘림
-        sourceHeight = videoWidth / displayAspect;
-        sourceY = (videoHeight - sourceHeight) / 2;
-    }
-    
-    // 캔버스 크기를 디스플레이 비율로 설정 (고해상도 유지)
-    const outputWidth = 1920;
-    const outputHeight = Math.round(outputWidth / displayAspect);
-    
-    cameraCanvas.width = outputWidth;
-    cameraCanvas.height = outputHeight;
-    
-    // 화면에 보이는 영역만 캔버스에 그리기
-    context.drawImage(
-        cameraVideo,
-        sourceX, sourceY, sourceWidth, sourceHeight,  // 소스 영역 (비디오에서 크롭)
-        0, 0, outputWidth, outputHeight                // 대상 영역 (캔버스 전체)
-    );
+    context.drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
     
     // 캔버스를 Blob으로 변환
     cameraCanvas.toBlob(async (blob) => {
@@ -4449,4 +4933,721 @@ function capturePhoto() {
         }
     }, 'image/jpeg', 0.95); // 95% 품질로 JPEG 저장
 }
+
+// ========================================
+// 빙고 챌린지 기능
+// ========================================
+
+// 빙고 데이터 구조
+const BINGO_COMPANIES = [
+    { name: '삼성전자', symbol: '005930', emoji: '📱' },
+    { name: '애플', symbol: 'AAPL', emoji: '🍎' },
+    { name: '코카콜라', symbol: 'KO', emoji: '🥤' },
+    { name: '나이키', symbol: 'NKE', emoji: '👟' },
+    { name: 'LG전자', symbol: '066570', emoji: '📺' },
+    { name: '맥도날드', symbol: 'MCD', emoji: '🍔' },
+    { name: '스타벅스', symbol: 'SBUX', emoji: '☕' },
+    { name: '현대자동차', symbol: '005380', emoji: '🚗' },
+    { name: '테슬라', symbol: 'TSLA', emoji: '⚡' }
+];
+
+// 빙고 상태 로드
+function loadBingoState() {
+    const saved = localStorage.getItem('bingoState');
+    if (saved) {
+        try {
+            return JSON.parse(saved);
+        } catch (e) {
+            console.error('빙고 상태 로드 실패:', e);
+        }
+    }
+    // 초기 상태: 모두 미완성
+    return BINGO_COMPANIES.map((company, index) => ({
+        ...company,
+        completed: false,
+        completedAt: null,
+        index
+    }));
+}
+
+// 빙고 상태 저장
+function saveBingoState(state) {
+    // 개발 모드: localStorage 저장 비활성화 (테스트 용이)
+    // 배포 시에는 아래 주석을 해제하세요
+    /*
+    try {
+        localStorage.setItem('bingoState', JSON.stringify(state));
+    } catch (e) {
+        console.error('빙고 상태 저장 실패:', e);
+    }
+    */
+    console.log('💾 빙고 상태 저장 (개발 모드: 비활성화)', state.filter(s => s.completed).length, '개 완성');
+}
+
+// 빙고 상태 초기화
+// 개발 모드: 새로고침 시 항상 리셋 (배포 시에는 loadBingoState()로 변경)
+let bingoState = BINGO_COMPANIES.map((company, index) => ({
+    ...company,
+    completed: false,
+    completedAt: null,
+    index
+}));
+
+// 빙고판 렌더링
+function renderBingoGrid() {
+    const bingoGrid = document.getElementById('bingoGrid');
+    if (!bingoGrid) return;
+    
+    bingoGrid.innerHTML = '';
+    
+    bingoState.forEach((cell, index) => {
+        const cellEl = document.createElement('div');
+        cellEl.className = `bingo-cell${cell.completed ? ' completed' : ''}`;
+        cellEl.dataset.index = index;
+        
+        cellEl.innerHTML = `
+            <div class="bingo-cell-logo">${cell.emoji}</div>
+            <div class="bingo-cell-name">${cell.name}</div>
+            <div class="bingo-cell-check">
+                <i data-lucide="check" width="16" height="16"></i>
+            </div>
+        `;
+        
+        bingoGrid.appendChild(cellEl);
+    });
+    
+    // Lucide 아이콘 재생성
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+    
+    updateBingoProgress();
+}
+
+// 빙고 진행률 업데이트
+function updateBingoProgress() {
+    const completedCount = bingoState.filter(cell => cell.completed).length;
+    const total = bingoState.length;
+    
+    // quick-action-bar 진행률
+    const progressEl = document.getElementById('bingoProgress');
+    if (progressEl) {
+        progressEl.textContent = `${completedCount}/${total}`;
+    }
+    
+    // 빙고 모달 진행률
+    const completedEl = document.getElementById('bingoCompleted');
+    if (completedEl) {
+        completedEl.textContent = completedCount;
+    }
+    
+    // 상품 상태
+    const rewardEl = document.getElementById('bingoReward');
+    if (rewardEl) {
+        if (completedCount === total) {
+            rewardEl.textContent = '🎉 완성!';
+            rewardEl.style.color = '#22c55e';
+        } else {
+            rewardEl.textContent = `${total - completedCount}개 남음`;
+        }
+    }
+}
+
+// 기업 완성 처리
+function completeCompany(companyName) {
+    // 정규화된 기업 이름으로 매칭
+    const normalizedName = normalizeCompanyName(companyName);
+    
+    // 영문-한글 매핑 (더 유연한 매칭을 위해)
+    const nameMapping = {
+        'samsung': '삼성전자',
+        'apple': '애플',
+        'coca': '코카콜라',
+        'coke': '코카콜라',
+        'nike': '나이키',
+        'lg': 'lg전자',
+        'mcdonald': '맥도날드',
+        'starbucks': '스타벅스',
+        'hyundai': '현대자동차',
+        'tesla': '테슬라'
+    };
+    
+    // 매핑 테이블에서 찾기
+    let matchedName = null;
+    for (const [eng, kor] of Object.entries(nameMapping)) {
+        if (normalizedName.includes(eng) || companyName.toLowerCase().includes(eng)) {
+            matchedName = kor;
+            break;
+        }
+    }
+    
+    // 빙고판에서 해당 기업 찾기
+    const cellIndex = bingoState.findIndex(cell => {
+        const cellNormalized = normalizeCompanyName(cell.name);
+        
+        // 1. 매핑된 이름으로 비교
+        if (matchedName && normalizeCompanyName(matchedName) === cellNormalized) {
+            return true;
+        }
+        
+        // 2. 정규화된 이름으로 직접 비교
+        if (cellNormalized === normalizedName) {
+            return true;
+        }
+        
+        // 3. 부분 문자열 비교
+        if (normalizedName.length > 2 && cellNormalized.includes(normalizedName)) {
+            return true;
+        }
+        
+        // 4. 역방향 부분 문자열 비교
+        if (cellNormalized.length > 2 && normalizedName.includes(cellNormalized)) {
+            return true;
+        }
+        
+        return false;
+    });
+    
+    if (cellIndex === -1) {
+        console.log('빙고판에 없는 기업:', companyName, '(정규화:', normalizedName, ')');
+        console.log('빙고판 기업 목록:', bingoState.map(c => c.name).join(', '));
+        return false;
+    }
+    
+    if (bingoState[cellIndex].completed) {
+        console.log('이미 완성된 칸:', companyName);
+        return false;
+    }
+    
+    // 완성 처리
+    bingoState[cellIndex].completed = true;
+    bingoState[cellIndex].completedAt = new Date().toISOString();
+    saveBingoState(bingoState);
+    
+    // UI 업데이트
+    renderBingoGrid();
+    
+    // 완성 알림
+    showBingoNotification(bingoState[cellIndex]);
+    
+    // 빙고 완성 체크
+    checkBingoComplete();
+    
+    return true;
+}
+
+// 기업 이름 정규화
+function normalizeCompanyName(name) {
+    if (!name) return '';
+    return name.toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/주식회사|㈜/g, '')
+        .replace(/corporation|corp|inc|ltd/gi, '')
+        .trim();
+}
+
+// 빙고 미체크 알림 (빙고판에 없거나 이미 완성된 경우)
+// showBingoMissNotification 함수 제거 (당첨일 때만 표시하도록 변경)
+
+// 빙고 완성 알림
+function showBingoNotification(cell) {
+    // 현재 진행률 계산
+    const completedCount = bingoState.filter(c => c.completed).length;
+    const total = bingoState.length;
+    const progress = `${completedCount}/${total}`;
+    
+    // 챗봇 메시지로 빙고 당첨 알림 (남아있음)
+    const message = `🎯 와! ${cell.emoji} ${cell.name} 빙고 당첨이에요! 현재 ${progress} 완성했어요!`;
+    addMessage(message, 'bot');
+    
+    // 화면 중앙 폭죽 효과 (생겼다 사라짐)
+    showConfettiEffect();
+}
+
+// 폭죽 효과 (화면 중앙)
+function showConfettiEffect() {
+    // 폭죽 컨테이너 생성
+    const confetti = document.createElement('div');
+    confetti.className = 'confetti-container';
+    confetti.innerHTML = `
+        <div class="confetti-celebration">
+            <div class="confetti-emoji">🎉</div>
+            <div class="confetti-emoji">🎊</div>
+            <div class="confetti-emoji">✨</div>
+            <div class="confetti-emoji">🎆</div>
+            <div class="confetti-emoji">💫</div>
+            <div class="confetti-emoji">⭐</div>
+            <div class="confetti-text">빙고 당첨!</div>
+        </div>
+    `;
+    
+    document.body.appendChild(confetti);
+    
+    // 2초 후 제거
+    setTimeout(() => {
+        confetti.style.opacity = '0';
+        setTimeout(() => {
+            confetti.remove();
+        }, 500);
+    }, 2000);
+}
+
+// 빙고 완성 체크
+function checkBingoComplete() {
+    const completedCount = bingoState.filter(cell => cell.completed).length;
+    const total = bingoState.length;
+    
+    if (completedCount === total) {
+        // 빙고 완성!
+        setTimeout(() => {
+            showBingoCompleteMessage();
+        }, 500);
+    }
+}
+
+// 빙고 완성 메시지
+function showBingoCompleteMessage() {
+    const message = document.createElement('div');
+    message.className = 'message bot-message';
+    message.style.cssText = `
+        animation: slideInRight 0.3s ease;
+        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+        color: white;
+        padding: 24px;
+        border-radius: 20px;
+        margin: 16px 0;
+        box-shadow: 0 8px 24px rgba(34, 197, 94, 0.4);
+        text-align: center;
+    `;
+    
+    message.innerHTML = `
+        <div style="font-size: 48px; margin-bottom: 12px;">🎉🎊🎁</div>
+        <div style="font-weight: 700; font-size: 20px; margin-bottom: 8px;">빙고 완성!</div>
+        <div style="font-size: 15px; opacity: 0.95; margin-bottom: 16px;">
+            축하합니다! 모든 기업을 찾았습니다!<br>
+            상품을 받으려면 관리자에게 문의하세요.
+        </div>
+        <button onclick="resetBingo()" style="
+            background: white;
+            color: #16a34a;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+        ">새 빙고 시작하기</button>
+    `;
+    
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) {
+        chatMessages.appendChild(message);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+}
+
+// 빙고 초기화
+function resetBingo() {
+    if (confirm('정말로 빙고를 초기화하시겠습니까? 현재 진행 상황이 모두 삭제됩니다.')) {
+        bingoState = BINGO_COMPANIES.map((company, index) => ({
+            ...company,
+            completed: false,
+            completedAt: null,
+            index
+        }));
+        saveBingoState(bingoState);
+        renderBingoGrid();
+        alert('빙고가 초기화되었습니다!');
+    }
+}
+
+// 빙고 모달 열기/닫기
+function openBingoModal() {
+    const modal = document.getElementById('bingoModal');
+    if (modal) {
+        renderBingoGrid();
+        modal.style.display = 'flex';
+        // Lucide 아이콘 재생성
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    }
+}
+
+function closeBingoModal() {
+    const modal = document.getElementById('bingoModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// 이벤트 리스너 등록 (DOM 로드 후)
+document.addEventListener('DOMContentLoaded', () => {
+    // 개발 모드: 페이지 로드 시 localStorage의 빙고 데이터 클리어
+    // 배포 시에는 아래 주석 처리하세요
+    localStorage.removeItem('bingoState');
+    console.log('🔄 개발 모드: 빙고 상태 초기화됨');
+    
+    // 빙고 버튼 클릭
+    const bingoBtn = document.getElementById('bingoBtn');
+    if (bingoBtn) {
+        bingoBtn.addEventListener('click', openBingoModal);
+    }
+    
+    // 빙고 모달 닫기 버튼
+    const bingoCloseBtn = document.getElementById('bingoCloseBtn');
+    if (bingoCloseBtn) {
+        bingoCloseBtn.addEventListener('click', closeBingoModal);
+    }
+    
+    // 빙고 모달 배경 클릭 시 닫기
+    const bingoModal = document.getElementById('bingoModal');
+    if (bingoModal) {
+        bingoModal.addEventListener('click', (e) => {
+            if (e.target === bingoModal) {
+                closeBingoModal();
+            }
+        });
+    }
+    
+    // 관심종목 바로가기 버튼
+    const favoriteBtns = document.querySelectorAll('.quick-action-btn.favorite-btn');
+    
+    favoriteBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            // quick action bar 닫기
+            const quickActionBar = document.getElementById('quickActionBar');
+            if (quickActionBar) {
+                quickActionBar.classList.remove('open');
+            }
+            
+            // 관심종목 모달 열기
+            openFavoriteModal();
+        });
+    });
+    
+    // 관심종목 모달 닫기 버튼
+    const favoriteCloseBtn = document.getElementById('favoriteCloseBtn');
+    if (favoriteCloseBtn) {
+        favoriteCloseBtn.addEventListener('click', closeFavoriteModal);
+    }
+    
+    // 관심종목 모달 배경 클릭 시 닫기
+    const favoriteModal = document.getElementById('favoriteModal');
+    if (favoriteModal) {
+        favoriteModal.addEventListener('click', (e) => {
+            if (e.target === favoriteModal) {
+                closeFavoriteModal();
+            }
+        });
+    }
+    
+    // 초기 진행률 업데이트
+    updateBingoProgress();
+});
+
+// ===================== 매매 모달 (증권앱 스타일) =====================
+
+// 현재 거래 중인 주식 정보 (mock)
+let currentTradeStock = {
+    name: '테슬라',
+    ticker: 'TSLA',
+    exchange: '나스닥',
+    price: 403.0000,
+    change: -1.3500,
+    changePercent: -0.33,
+    currency: 'USD'
+};
+
+// 매매 모달 열기
+function openTradeModal(stockData = null) {
+    const modal = document.getElementById('tradeModal');
+    if (!modal) return;
+    
+    // 주식 정보 설정 (제공된 데이터 또는 기본값)
+    if (stockData) {
+        currentTradeStock = {
+            name: stockData.name || '테슬라',
+            ticker: stockData.symbol || stockData.code || 'TSLA',
+            exchange: stockData.exchange || '나스닥',
+            price: stockData.price || 403.0000,
+            change: stockData.change || -1.3500,
+            changePercent: stockData.changePercent || -0.33,
+            currency: stockData.currency || 'USD'
+        };
+    }
+    
+    // UI 업데이트
+    document.getElementById('tradeStockName').textContent = currentTradeStock.name;
+    document.getElementById('tradeTicker').textContent = currentTradeStock.ticker;
+    document.getElementById('tradeExchange').textContent = currentTradeStock.exchange;
+    
+    // 가격 표시
+    const priceFormatted = currentTradeStock.currency === 'KRW' 
+        ? `${currentTradeStock.price.toLocaleString()}원`
+        : `$${currentTradeStock.price.toFixed(4)}`;
+    document.getElementById('tradeCurrentPrice').textContent = priceFormatted;
+    
+    // 등락 표시
+    const priceChangeEl = document.getElementById('tradePriceChange');
+    const isPositive = currentTradeStock.change >= 0;
+    priceChangeEl.className = `trade-price-change ${isPositive ? 'positive' : 'negative'}`;
+    
+    const changeFormatted = currentTradeStock.currency === 'KRW'
+        ? `${isPositive ? '+' : ''}${currentTradeStock.change.toLocaleString()}`
+        : `${isPositive ? '+' : ''}${currentTradeStock.change.toFixed(4)}`;
+    
+    priceChangeEl.textContent = `${changeFormatted} (${isPositive ? '+' : ''}${currentTradeStock.changePercent.toFixed(2)}%)`;
+    
+    // 모달 표시
+    modal.style.display = 'flex';
+    
+    // 차트 그리기
+    setTimeout(() => {
+        drawTradeChart();
+    }, 100);
+    
+    // Lucide 아이콘 초기화
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+}
+
+// 주가 차트 그리기
+function drawTradeChart() {
+    const canvas = document.getElementById('tradeChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.offsetWidth;
+    const height = canvas.offsetHeight;
+    
+    // Canvas 크기 조정 (레티나 디스플레이 대응)
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
+    
+    // 배경 색상
+    ctx.fillStyle = '#1a1a1e';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Mock 데이터 생성 (주가)
+    const dataPoints = 60;
+    const basePrice = currentTradeStock.price;
+    const priceData = [];
+    const volumeData = [];
+    
+    let currentPrice = basePrice * 1.05; // 시작 가격 (5% 높게)
+    for (let i = 0; i < dataPoints; i++) {
+        const change = (Math.random() - 0.5) * basePrice * 0.02; // ±2% 변동
+        currentPrice += change;
+        priceData.push(currentPrice);
+        volumeData.push(Math.random() * 100 + 20); // 거래량
+    }
+    
+    // 가격 범위 계산
+    const maxPrice = Math.max(...priceData);
+    const minPrice = Math.min(...priceData);
+    const priceRange = maxPrice - minPrice;
+    
+    // 차트 영역 설정
+    const chartTop = 20;
+    const chartBottom = height - 80; // 하단 거래량 영역 확보
+    const chartHeight = chartBottom - chartTop;
+    const chartLeft = 40;
+    const chartRight = width - 20;
+    const chartWidth = chartRight - chartLeft;
+    
+    // 그리드 선 그리기
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    
+    // 수평 그리드
+    for (let i = 0; i <= 4; i++) {
+        const y = chartTop + (chartHeight / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(chartLeft, y);
+        ctx.lineTo(chartRight, y);
+        ctx.stroke();
+        
+        // 가격 레이블
+        const price = maxPrice - (priceRange / 4) * i;
+        ctx.fillStyle = '#8b8b8f';
+        ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(price.toFixed(2), chartLeft - 5, y + 4);
+    }
+    
+    // 수직 그리드
+    const timeSteps = 6;
+    for (let i = 0; i <= timeSteps; i++) {
+        const x = chartLeft + (chartWidth / timeSteps) * i;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.beginPath();
+        ctx.moveTo(x, chartTop);
+        ctx.lineTo(x, chartBottom);
+        ctx.stroke();
+    }
+    
+    // 주가 선 그리기
+    const isNegative = currentTradeStock.change < 0;
+    const lineColor = isNegative ? '#ff5470' : '#5470ff';
+    const fillColor = isNegative ? 'rgba(255, 84, 112, 0.1)' : 'rgba(84, 112, 255, 0.1)';
+    
+    ctx.beginPath();
+    ctx.moveTo(chartLeft, chartBottom);
+    
+    for (let i = 0; i < priceData.length; i++) {
+        const x = chartLeft + (chartWidth / (dataPoints - 1)) * i;
+        const y = chartTop + chartHeight - ((priceData[i] - minPrice) / priceRange * chartHeight);
+        
+        if (i === 0) {
+            ctx.lineTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    }
+    
+    // 영역 채우기
+    ctx.lineTo(chartRight, chartBottom);
+    ctx.lineTo(chartLeft, chartBottom);
+    ctx.closePath();
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+    
+    // 선 그리기
+    ctx.beginPath();
+    for (let i = 0; i < priceData.length; i++) {
+        const x = chartLeft + (chartWidth / (dataPoints - 1)) * i;
+        const y = chartTop + chartHeight - ((priceData[i] - minPrice) / priceRange * chartHeight);
+        
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    }
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // 현재가 표시 (마지막 점)
+    const lastX = chartRight;
+    const lastY = chartTop + chartHeight - ((priceData[priceData.length - 1] - minPrice) / priceRange * chartHeight);
+    
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = lineColor;
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 6, 0, Math.PI * 2);
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // 거래량 바 차트 그리기
+    const volumeTop = chartBottom + 20;
+    const volumeHeight = 40;
+    const maxVolume = Math.max(...volumeData);
+    const barWidth = chartWidth / dataPoints;
+    
+    for (let i = 0; i < volumeData.length; i++) {
+        const x = chartLeft + (chartWidth / dataPoints) * i;
+        const barHeight = (volumeData[i] / maxVolume) * volumeHeight;
+        const y = volumeTop + volumeHeight - barHeight;
+        
+        // 가격 변동에 따라 색상 결정
+        let barColor;
+        if (i === 0) {
+            barColor = 'rgba(139, 139, 143, 0.3)';
+        } else {
+            barColor = priceData[i] >= priceData[i - 1] 
+                ? 'rgba(84, 112, 255, 0.5)' 
+                : 'rgba(255, 84, 112, 0.5)';
+        }
+        
+        ctx.fillStyle = barColor;
+        ctx.fillRect(x, y, barWidth * 0.8, barHeight);
+    }
+    
+    // 최고가/최저가 표시
+    const highIndex = priceData.indexOf(maxPrice);
+    const lowIndex = priceData.indexOf(minPrice);
+    
+    const highX = chartLeft + (chartWidth / (dataPoints - 1)) * highIndex;
+    const highY = chartTop + chartHeight - ((maxPrice - minPrice) / priceRange * chartHeight);
+    const lowX = chartLeft + (chartWidth / (dataPoints - 1)) * lowIndex;
+    const lowY = chartTop + chartHeight - ((minPrice - minPrice) / priceRange * chartHeight);
+    
+    // 최고가 레이블
+    ctx.fillStyle = '#5470ff';
+    ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`최고 $${maxPrice.toFixed(2)}`, highX, highY - 10);
+    
+    // 최저가 레이블
+    ctx.fillStyle = '#ff5470';
+    ctx.fillText(`최저 $${minPrice.toFixed(2)}`, lowX, lowY + 20);
+}
+
+// 매매 모달 닫기
+function closeTradeModal() {
+    const modal = document.getElementById('tradeModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// 이벤트 리스너 등록
+document.addEventListener('DOMContentLoaded', () => {
+    // 매매 바로가기 버튼
+    const tradeBtn = document.querySelector('.quick-action-content .quick-action-btn:first-child');
+    if (tradeBtn) {
+        tradeBtn.addEventListener('click', () => {
+            openTradeModal(currentTradeStock);
+        });
+    }
+    
+    // 닫기 버튼 (X)
+    const tradeCloseBtn = document.getElementById('tradeCloseBtn');
+    if (tradeCloseBtn) {
+        tradeCloseBtn.addEventListener('click', closeTradeModal);
+    }
+    
+    // 뒤로가기 버튼 (아래 화살표)
+    const tradeBackBtn = document.getElementById('tradeBackBtn');
+    if (tradeBackBtn) {
+        tradeBackBtn.addEventListener('click', closeTradeModal);
+    }
+    
+    // 팔게요/살게요 버튼 (데모용 알림만)
+    const tradeSellBtn = document.querySelector('.trade-sell-btn');
+    const tradeBuyBtn = document.querySelector('.trade-buy-btn');
+    
+    if (tradeSellBtn) {
+        tradeSellBtn.addEventListener('click', () => {
+            alert('💸 매도 화면 (데모)\n\n실제 거래 기능은 구현되지 않았습니다.');
+        });
+    }
+    
+    if (tradeBuyBtn) {
+        tradeBuyBtn.addEventListener('click', () => {
+            alert('💰 매수 화면 (데모)\n\n실제 거래 기능은 구현되지 않았습니다.');
+        });
+    }
+    
+    // 기간 선택 버튼
+    const periodBtns = document.querySelectorAll('.trade-period-btn');
+    periodBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            periodBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            // 차트 다시 그리기
+            drawTradeChart();
+        });
+    });
+});
 

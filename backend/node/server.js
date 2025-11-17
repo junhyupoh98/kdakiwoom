@@ -442,6 +442,83 @@ app.get('/api/stock/:query/financials', async (req, res) => {
   }
 });
 
+// ============ 한국 주식 전용 라우트 (Python 서버 프록시) ============
+
+// 한국 주식 기본 정보 조회
+app.get('/api/kr-stock/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol;
+    console.log(`[한국 주식 정보] 요청: ${symbol}`);
+    
+    // Python 서버로 프록시
+    const response = await axios.get(`${PYTHON_SERVER_URL}/api/kr-stock/${symbol}`);
+    return res.json(response.data);
+  } catch (error) {
+    console.error(`[한국 주식 정보] 오류 (${req.params.symbol}):`, error.message);
+    if (error.response) {
+      return res.status(error.response.status).json(error.response.data);
+    }
+    return res.status(500).json({ error: '주가 정보를 가져올 수 없습니다.' });
+  }
+});
+
+// 한국 주식 차트 데이터 조회
+app.get('/api/kr-stock/:symbol/chart', async (req, res) => {
+  try {
+    const symbol = req.params.symbol;
+    const period = req.query.period || '1m';
+    console.log(`[한국 주식 차트] 요청: ${symbol}, 기간: ${period}`);
+    
+    // Python 서버로 프록시
+    const response = await axios.get(`${PYTHON_SERVER_URL}/api/kr-stock/${symbol}/chart`, {
+      params: { period }
+    });
+    return res.json(response.data);
+  } catch (error) {
+    console.error(`[한국 주식 차트] 오류 (${req.params.symbol}):`, error.message);
+    if (error.response) {
+      return res.status(error.response.status).json(error.response.data);
+    }
+    return res.status(500).json({ error: '차트 데이터를 가져올 수 없습니다.' });
+  }
+});
+
+// 한국 주식 뉴스 조회
+app.get('/api/kr-stock/:symbol/news', async (req, res) => {
+  try {
+    const symbol = req.params.symbol;
+    console.log(`[한국 주식 뉴스] 요청: ${symbol}`);
+    
+    // Python 서버로 프록시
+    const response = await axios.get(`${PYTHON_SERVER_URL}/api/kr-stock/${symbol}/news`);
+    return res.json(response.data);
+  } catch (error) {
+    console.error(`[한국 주식 뉴스] 오류 (${req.params.symbol}):`, error.message);
+    if (error.response) {
+      return res.status(error.response.status).json(error.response.data);
+    }
+    return res.status(500).json({ error: '뉴스를 가져올 수 없습니다.' });
+  }
+});
+
+// 한국 주식 재무제표 조회 (이미 존재하는 통합 라우트에서 처리되지만 명시적으로 추가)
+app.get('/api/kr-stock/:symbol/financials', async (req, res) => {
+  try {
+    const symbol = req.params.symbol;
+    console.log(`[한국 주식 재무제표] 요청: ${symbol}`);
+    
+    // Python 서버로 프록시
+    const response = await axios.get(`${PYTHON_SERVER_URL}/api/kr-stock/${symbol}/financials`);
+    return res.json(response.data);
+  } catch (error) {
+    console.error(`[한국 주식 재무제표] 오류 (${req.params.symbol}):`, error.message);
+    if (error.response) {
+      return res.status(error.response.status).json(error.response.data);
+    }
+    return res.status(500).json({ error: '재무제표를 가져올 수 없습니다.' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);
   console.log(`Python 서버는 ${PYTHON_SERVER_URL}에서 실행되어야 합니다.`);

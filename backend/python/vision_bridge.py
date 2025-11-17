@@ -858,21 +858,22 @@ def analyze_product_from_image(image_bytes: bytes, *, enrich: bool = True) -> Di
             except Exception as e:
                 logger.warning("지주회사 보강 실패: %s", str(e))
 
-            # 2) 밸류체인 공급사 제안 (최대 2개)
-            try:
-                vc = suggest_value_chain_suppliers(
-                    object_name=base_data.get("object"),
-                    brand=base_data.get("brand"),
-                    text_hint=summary[:500] if summary else None,
-                    supplier_candidates=None,
-                    api_key=api_key,
-                    selected_model=selected_model,
-                    top_k=2,
-                )
-                if vc:
-                    final_result["value_chain"] = vc
-            except Exception as e:
-                logger.warning("밸류체인 제안 실패: %s", str(e))
+            # 2) 밸류체인 공급사 제안 (최대 2개) - 속도 최적화를 위해 비활성화
+            # 밸류체인 정보는 하드코딩된 데이터만 사용하므로 API 호출 생략
+            # try:
+            #     vc = suggest_value_chain_suppliers(
+            #         object_name=base_data.get("object"),
+            #         brand=base_data.get("brand"),
+            #         text_hint=summary[:500] if summary else None,
+            #         supplier_candidates=None,
+            #         api_key=api_key,
+            #         selected_model=selected_model,
+            #         top_k=2,
+            #     )
+            #     if vc:
+            #         final_result["value_chain"] = vc
+            # except Exception as e:
+            #     logger.warning("밸류체인 제안 실패: %s", str(e))
 
             # 3) 관련 상장사 제안 (최대 3개)
             try:

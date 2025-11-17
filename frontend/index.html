@@ -422,12 +422,14 @@
         </button>
         
         <!-- 상단 검색바 강조 섹션 -->
-        <div class="landing-search-hero">
+        <div class="landing-search-hero" id="landingSearchHero">
             <h2 class="search-hero-title">일상 속 투자 기회를<br>사진으로 발견하세요!</h2>
             <div class="landing-search-bar" id="landingSearchBar">
                 <i data-lucide="search" width="20" height="20"></i>
-                <span class="search-placeholder">사진 한장으로 투자 종목을 찾을 수 있다면?</span>
-                <i data-lucide="image" width="20" height="20"></i>
+                <input type="text" id="landingSearchInput" placeholder="사진 한장으로 투자 종목을 찾을 수 있다면?" />
+                <button class="landing-search-submit-btn" id="landingSearchSubmitBtn">
+                    <i data-lucide="send" width="20" height="20"></i>
+                </button>
             </div>
         </div>
         
@@ -516,6 +518,11 @@
                 <button class="quick-action-btn favorite-btn">
                     <span>관심종목 바로가기</span>
                 </button>
+                <button class="quick-action-btn bingo-btn" id="bingoBtn">
+                    <i data-lucide="grid-3x3" width="20" height="20"></i>
+                    <span>빙고 챌린지</span>
+                    <span class="bingo-progress" id="bingoProgress">0/9</span>
+                </button>
             </div>
         </div>
         
@@ -561,6 +568,143 @@
                     <i data-lucide="camera" width="28" height="28"></i>
                     <span>촬영</span>
                 </button>
+                <button class="camera-album-btn" id="cameraAlbumBtn">
+                    <i data-lucide="images" width="28" height="28"></i>
+                    <span>앨범</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 빙고 모달 -->
+    <div class="bingo-modal" id="bingoModal" style="display: none;">
+        <div class="bingo-modal-content">
+            <div class="bingo-header">
+                <h3>🎯 빙고 챌린지</h3>
+                <button class="bingo-close-btn" id="bingoCloseBtn">
+                    <i data-lucide="x" width="24" height="24"></i>
+                </button>
+            </div>
+            <div class="bingo-body">
+                <div class="bingo-info">
+                    <p class="bingo-desc">사진으로 기업을 찾고 빙고를 완성하세요!</p>
+                    <div class="bingo-stats">
+                        <span class="bingo-stat">
+                            <i data-lucide="check-circle" width="18" height="18"></i>
+                            <span id="bingoCompleted">0</span>/9 완성
+                        </span>
+                        <span class="bingo-stat">
+                            <i data-lucide="gift" width="18" height="18"></i>
+                            <span id="bingoReward">상품 대기중</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="bingo-grid" id="bingoGrid">
+                    <!-- 빙고 칸들이 동적으로 생성됨 -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 관심종목 모달 -->
+    <div class="favorite-modal" id="favoriteModal" style="display: none;">
+        <div class="favorite-modal-content">
+            <div class="favorite-header">
+                <h3>⭐ 나의 관심종목</h3>
+                <button class="favorite-close-btn" id="favoriteCloseBtn">
+                    <i data-lucide="x" width="24" height="24"></i>
+                </button>
+            </div>
+            <div class="favorite-body">
+                <div class="favorite-info">
+                    <p class="favorite-desc">관심있는 종목을 모아보세요!</p>
+                    <div class="favorite-stats">
+                        <span class="favorite-stat">
+                            <i data-lucide="star" width="18" height="18"></i>
+                            <span id="favoriteCount">0</span>개 종목
+                        </span>
+                    </div>
+                </div>
+                <div class="favorite-list" id="favoriteList">
+                    <!-- 관심종목 리스트가 동적으로 생성됨 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 매매 모달 (증권앱 스타일) -->
+    <div class="trade-modal" id="tradeModal" style="display: none;">
+        <div class="trade-modal-content">
+            <!-- 상단 툴바 -->
+            <div class="trade-toolbar">
+                <div class="trade-toolbar-left">
+                    <button class="trade-back-btn" id="tradeBackBtn">
+                        <i data-lucide="chevron-down" width="24" height="24"></i>
+                    </button>
+                </div>
+                <div class="trade-toolbar-right">
+                    <button class="trade-action-btn">
+                        <i data-lucide="search" width="24" height="24"></i>
+                    </button>
+                    <button class="trade-action-btn">
+                        <i data-lucide="star" width="24" height="24"></i>
+                    </button>
+                    <button class="trade-action-btn" id="tradeCloseBtn">
+                        <i data-lucide="x" width="24" height="24"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 종목 정보 헤더 -->
+            <div class="trade-stock-header">
+                <h1 class="trade-stock-name" id="tradeStockName">테슬라</h1>
+                <div class="trade-current-price" id="tradeCurrentPrice">$403.0000</div>
+                <div class="trade-price-change negative" id="tradePriceChange">
+                    -1.3500 (-0.33%)
+                </div>
+                <div class="trade-stock-meta">
+                    <span class="trade-meta-item" id="tradeTicker">TSLA</span>
+                    <span class="trade-meta-item" id="tradeExchange">나스닥</span>
+                    <span class="trade-meta-item">종 50</span>
+                    <span class="trade-meta-item">무료</span>
+                </div>
+            </div>
+            
+            <!-- 관심 종목 버튼 -->
+            <div class="trade-favorite-bar">
+                <button class="trade-favorite-btn">
+                    <span>⭐</span>
+                    <span>관심에 1,125,676번 추가했어요</span>
+                    <i data-lucide="info" width="18" height="18"></i>
+                </button>
+            </div>
+            
+            <!-- 차트 영역 -->
+            <div class="trade-chart-area">
+                <div class="trade-chart-container">
+                    <canvas id="tradeChart" width="400" height="300"></canvas>
+                </div>
+                
+                <!-- 기간 선택 -->
+                <div class="trade-period-tabs">
+                    <button class="trade-period-btn active">1분</button>
+                    <button class="trade-period-btn">일</button>
+                    <button class="trade-period-btn">주</button>
+                    <button class="trade-period-btn">월</button>
+                    <button class="trade-period-btn">년</button>
+                    <button class="trade-period-btn">
+                        <i data-lucide="bar-chart-2" width="18" height="18"></i>
+                    </button>
+                    <button class="trade-period-btn">
+                        <i data-lucide="trending-up" width="18" height="18"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 하단 매매 버튼 -->
+            <div class="trade-action-buttons">
+                <button class="trade-sell-btn">팔게요</button>
+                <button class="trade-buy-btn">살게요</button>
             </div>
         </div>
     </div>

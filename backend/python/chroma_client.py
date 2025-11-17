@@ -189,7 +189,7 @@ def fetch_us_stock_news(symbol: str, limit: int = 3) -> List[Dict[str, Any]]:
         news_items.append(
             {
                 "id": ids[idx] if idx < len(ids) else None,
-                "ticker": metadata.get("ticker") or metadata.get("fmp_ticker"),
+                "ticker": metadata.get("ticker"),
                 "title": metadata.get("title"),
                 "summary": doc,
                 "url": metadata.get("url"),

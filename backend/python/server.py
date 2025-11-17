@@ -53,8 +53,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 app = Flask(__name__)
 CORS(app)
 
-# FMP API 키 (무료 티어 사용)
-FMP_API_KEY = os.getenv("FMP_API_KEY")
 # DART API 키 (https://opendart.fss.or.kr/ 에서 발급 필요)
 DART_API_KEY = os.getenv("DART_API_KEY")
 # 네이버 뉴스 API 키
@@ -62,12 +60,6 @@ NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# API 키 설정 상태 로그
-if FMP_API_KEY:
-    print('[OK] FMP API 키가 설정되었습니다.')
-else:
-    print('[WARN] FMP API 키가 설정되지 않았습니다. 일부 해외 데이터가 제한될 수 있습니다.')
 
 # DART API 초기화 확인
 if DART_API_KEY:
@@ -595,22 +587,6 @@ def collect_naver_news(company: str, sort: str = "sim") -> List[Dict]:
     return rows
 
 # 뉴스 수집 함수
-def get_fmp_stock_news(ticker, api_key, limit=20):
-    """FMP API로 주식 뉴스 가져오기"""
-    print(f"\n--- [FMP] {ticker} 최신 뉴스 {limit}개 검색 ---")
-    url = f"https://financialmodelingprep.com/api/v3/stock_news?tickers={ticker}&limit={limit}&apikey={api_key}"
-    try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        data = res.json()
-        if not data:
-            print("뉴스 없음.")
-            return []
-        return data
-    except Exception as e:
-        print(f"FMP API 오류: {e}")
-        return []
-
 # 번역 함수
 def translate_text(text, dest_lang='ko'):
     """텍스트 번역"""
@@ -846,68 +822,9 @@ def get_stock_news_api(symbol):
             print(f"[DEBUG] US news response items: {len(response_items)}개")
             return jsonify({'news': response_items})
 
-        # 폴백: 기존 FMP 로직
-        print(f'\n--- [INFO] {clean_symbol} 뉴스 분석 시작 (FMP 폴백) ---')
-        ticker_names = [clean_symbol]
-        news_list = get_fmp_stock_news(clean_symbol, FMP_API_KEY, limit=NEWS_LIMIT)
-        
-        if not news_list:
-            print(f"[WARN] {clean_symbol}에 대한 FMP 뉴스가 없습니다.")
-            return jsonify({'news': []})
-        
-        print(f"[INFO] FMP에서 {len(news_list)}개 뉴스 수집 완료")
-        
-        # 100점 이상 기사 선별, 번역, ChatGPT 요약 (없으면 점수 상관없이 상위 기사 반환)
-        best_articles = find_and_process_high_scoring_articles(news_list, ticker_names)
-        
-        if not best_articles:
-            print(f"[WARN] {clean_symbol}에 대한 뉴스 기사를 찾을 수 없습니다. (필터링 후 0개)")
-            # 원본 뉴스 중 상위 5개를 간단히 반환 (번역 없이)
-            print(f"[INFO] 원본 뉴스 {min(5, len(news_list))}개 반환 시도")
-            processed_news = []
-            for article in news_list[:5]:
-                title = article.get('title', '')
-                published_date = article.get('publishedDate', '')
-                site = article.get('site', '')
-                url = article.get('url', '')
-                
-                # 날짜 포맷팅
-                date_str = ''
-                if published_date:
-                    try:
-                        from datetime import datetime
-                        dt = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
-                        date_str = dt.strftime('%Y-%m-%d %H:%M')
-                    except:
-                        date_str = published_date[:10] if len(published_date) >= 10 else published_date
-                
-                processed_news.append({
-                    'title': title,
-                    'summary': article.get('text', '')[:200] + '...' if article.get('text') else '',
-                    'url': url,
-                    'date': date_str,
-                    'site': site or 'Unknown'
-                })
-            
-            if processed_news:
-                print(f"[OK] 원본 뉴스 {len(processed_news)}개 반환")
-                return jsonify({'news': processed_news})
-            else:
-                return jsonify({'news': []})
-        
-        # 최대 10개 반환 (기존 5개에서 증가)
-        processed_news = []
-        for article in best_articles[:10]:
-            processed_news.append({
-                'title': article.get('title_ko', ''),
-                'summary': article.get('summary_ko', ''),
-                'url': article.get('url', ''),
-                'date': article.get('date', ''),
-                'site': article.get('site', '')
-            })
-        
-        print(f"[OK] 처리된 뉴스 {len(processed_news)}개 반환")
-        return jsonify({'news': processed_news})
+        # ChromaDB에 데이터가 없으면 빈 배열 반환
+        print(f"[WARN] {clean_symbol}에 대한 뉴스가 ChromaDB에 없습니다.")
+        return jsonify({'news': []})
     except Exception as e:
         print(f'뉴스 API 오류: {e}')
         return jsonify({'news': []})
@@ -988,43 +905,6 @@ def get_kr_stock_news(symbol):
                 traceback.print_exc()
         else:
             print(f'[WARN] 네이버 API 키가 설정되지 않음 (CLIENT_ID: {bool(NAVER_CLIENT_ID)}, CLIENT_SECRET: {bool(NAVER_CLIENT_SECRET)})')
-        
-        # 2. 네이버 뉴스가 없거나 부족하면 FMP 뉴스로 보충
-        if len(news) < 5:
-            try:
-                print(f'\n--- [INFO] {company_name} ({clean_symbol}) FMP 뉴스 보충 시도 ---')
-                ticker_names = [company_name, clean_symbol]
-                # 한국 주식은 .KS를 붙여서 FMP에 요청
-                kr_symbol_fmp = f"{clean_symbol}.KS"
-                news_list = get_fmp_stock_news(kr_symbol_fmp, FMP_API_KEY, limit=NEWS_LIMIT)
-                
-                if news_list:
-                    print(f'[INFO] FMP에서 {len(news_list)}개 뉴스 수집')
-                    best_articles = find_and_process_high_scoring_articles(news_list, ticker_names)
-                    
-                    if best_articles:
-                        print(f'[INFO] FMP 뉴스 필터링 후 {len(best_articles)}개 기사')
-                        existed_urls = set(n.get('url', '') for n in news)
-                        for article in best_articles:
-                            article_url = article.get('url', '')
-                            if article_url and article_url not in existed_urls:
-                                news.append({
-                                    'title': article.get('title_ko', ''),
-                                    'summary': article.get('summary_ko', ''),
-                                    'url': article_url,
-                                    'date': article.get('date', ''),
-                                    'site': article.get('site', '')
-                                })
-                            if len(news) >= 10:
-                                break
-                    else:
-                        print(f'[WARN] FMP 뉴스 필터링 후 0개 기사')
-                else:
-                    print(f'[WARN] FMP 뉴스 없음')
-            except Exception as e:
-                print(f'[ERROR] FMP 뉴스 조회 오류: {e}')
-                import traceback
-                traceback.print_exc()
         
         print(f'[INFO] 최종 뉴스 개수: {len(news)}개')
         return jsonify({'news': news[:10]})  # 최대 10개 반환
@@ -1124,62 +1004,8 @@ def normalize_segment_data(raw: List[Dict[str, Any]]) -> Tuple[List[Dict[str, An
     df = df.sort_values("revenue", ascending=False).reset_index(drop=True)
     return df.to_dict('records'), latest_date
 
-def get_reported_currency(ticker: str) -> str:
-    """보고 통화 가져오기"""
-    try:
-        url = f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}"
-        params = {"period": "quarter", "limit": 1, "apikey": FMP_API_KEY}
-        response = requests.get(url, params=params, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if data and isinstance(data, list) and len(data) > 0:
-                cur = data[0].get("reportedCurrency") or data[0].get("currency")
-                if cur:
-                    return cur.upper()
-    except:
-        pass
-    return "USD"
-
-def fetch_segment_data(ticker: str) -> Optional[Dict[str, Any]]:
-    """세그먼트 데이터 빠르게 가져오기 (타임아웃 짧게)"""
-    try:
-        url = "https://financialmodelingprep.com/api/v4/revenue-product-segmentation"
-        params = {"symbol": ticker, "period": "quarter", "apikey": FMP_API_KEY}
-        print(f'[INFO] 세그먼트 데이터 요청: {ticker}')
-        response = requests.get(url, params=params, timeout=5)  # 타임아웃 5초로 증가
-        
-        if response.status_code != 200:
-            print(f'[ERROR] 세그먼트 API 응답 오류: {response.status_code}')
-            return None
-        
-        data = response.json()
-        if not data:
-            print(f'[WARN] 세그먼트 데이터가 비어있음: {ticker}')
-            return None
-        
-        print(f'[INFO] 세그먼트 원본 데이터 수: {len(data) if isinstance(data, list) else "dict"}')
-        segments, date_str = normalize_segment_data(data)
-        
-        if not segments:
-            print(f'[WARN] 세그먼트 데이터 정규화 실패: {ticker}')
-            return None
-        
-        print(f'[OK] 세그먼트 정규화 성공: {len(segments)}개')
-        currency = get_reported_currency(ticker)
-        
-        return {
-            'segments': segments,
-            'date': date_str,
-            'currency': currency
-        }
-    except requests.exceptions.Timeout:
-        print(f'[TIMEOUT] 세그먼트 데이터 조회 타임아웃: {ticker}')
-        return None
-    except Exception as e:
-        print(f'[ERROR] 세그먼트 데이터 조회 오류: {ticker} - {type(e).__name__}: {str(e)}')
-        import traceback
-        traceback.print_exc()
-        return None
+# get_reported_currency 및 fetch_segment_data 함수는 FMP API를 사용하므로 제거됨
+# 모든 세그먼트 데이터는 ChromaDB에서 가져옵니다
 
 # 재무제표 API 엔드포인트
 @app.route('/api/stock/<symbol>/earnings-call', methods=['GET'])
@@ -1220,106 +1046,16 @@ def get_stock_financials(symbol):
                 except Exception as e:
                     print(f'DART API 재무제표 조회 오류: {e}')
             
-            # DART 실패 시 FMP API로 폴백
-            try:
-                kr_symbol = f"{clean_symbol}.KS"
-                url = f"https://financialmodelingprep.com/api/v3/income-statement/{kr_symbol}?period=quarter&limit=4&apikey={FMP_API_KEY}"
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                income_statements = response.json()
-                
-                if isinstance(income_statements, dict) and 'Error Message' in income_statements:
-                    raise Exception("FMP API에서 데이터를 찾을 수 없습니다.")
-                
-                if not income_statements or len(income_statements) == 0:
-                    return jsonify({
-                        'revenue': [],
-                        'netIncome': [],
-                        'operatingIncome': [],
-                        'chartData': []
-                    })
-                
-                # FMP 데이터 파싱
-                chart_data = []
-                revenue_data = []
-                net_income_data = []
-                operating_income_data = []
-                
-                for statement in reversed(income_statements):
-                    year = statement.get('calendarYear', '')
-                    quarter = statement.get('quarter', '')
-                    revenue = statement.get('revenue', 0) or 0
-                    net_income = statement.get('netIncome', 0) or 0
-                    operating_income = statement.get('operatingIncome', 0) or 0
-                    
-                    if year and quarter:
-                        label = f"{year} Q{quarter}"
-                    else:
-                        label = year if year else ''
-                    
-                    if label:
-                        chart_data.append({
-                            'year': label,
-                            'revenue': revenue,
-                            'netIncome': net_income,
-                            'operatingIncome': operating_income
-                        })
-                        revenue_data.append({'year': label, 'value': revenue})
-                        net_income_data.append({'year': label, 'value': net_income})
-                        operating_income_data.append({'year': label, 'value': operating_income})
-                
-                latest = income_statements[0] if income_statements else {}
-                latest_year = latest.get('calendarYear', '')
-                latest_quarter = latest.get('quarter', '')
-                latest_label = f"{latest_year} Q{latest_quarter}" if latest_year and latest_quarter else latest_year
-                
-                # 세그먼트 데이터 병렬로 가져오기 (선택적, 실패해도 무방)
-                segment_data = None
-                try:
-                    with ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(fetch_segment_data, kr_symbol)
-                        try:
-                            segment_data = future.result(timeout=5)  # 타임아웃 5초로 증가
-                            if segment_data:
-                                print(f'[OK] 세그먼트 데이터 수집 성공: {kr_symbol} ({len(segment_data.get("segments", []))}개 세그먼트)')
-                            else:
-                                print(f'[WARN] 세그먼트 데이터 없음: {kr_symbol}')
-                        except Exception as e:
-                            print(f'[WARN] 세그먼트 데이터 조회 실패: {kr_symbol} - {str(e)}')
-                except Exception as e:
-                    print(f'[WARN] 세그먼트 데이터 조회 오류: {kr_symbol} - {str(e)}')
-                
-                result = {
-                    'revenue': revenue_data,
-                    'netIncome': net_income_data,
-                    'operatingIncome': operating_income_data,
-                    'chartData': chart_data,
-                    'latest': {
-                        'revenue': latest.get('revenue', 0) or 0,
-                        'netIncome': latest.get('netIncome', 0) or 0,
-                        'operatingIncome': latest.get('operatingIncome', 0) or 0,
-                        'year': latest_label
-                    },
-                    'currency': 'KRW'
-                }
-                
-                # 세그먼트 데이터가 있으면 추가
-                if segment_data:
-                    result['segments'] = segment_data['segments']
-                    result['segmentDate'] = segment_data['date']
-                    result['segmentCurrency'] = segment_data['currency']
-                
-                return jsonify(result)
-            except Exception as e:
-                print(f'FMP 폴백 오류: {e}')
-                return jsonify({
-                    'revenue': [],
-                    'netIncome': [],
-                    'operatingIncome': [],
-                    'chartData': []
-                })
+            # DART 실패 시 빈 데이터 반환
+            print(f'[WARN] DART API에서 {clean_symbol} 재무 데이터를 찾을 수 없습니다.')
+            return jsonify({
+                'revenue': [],
+                'netIncome': [],
+                'operatingIncome': [],
+                'chartData': []
+            })
         
-        # 해외 주식 재무제표 가져오기 (FMP API)
+        # 해외 주식 재무제표 가져오기 (ChromaDB만 사용)
         try:
             chroma_financials = fetch_us_financials_from_chroma(clean_symbol)
             if chroma_financials:
@@ -1328,106 +1064,14 @@ def get_stock_financials(symbol):
         except Exception as e:
             print(f'[WARN] ChromaDB 재무 데이터 조회 실패: {clean_symbol} - {e}')
 
-        try:
-            # 분기별 재무제표 데이터
-            url = f"https://financialmodelingprep.com/api/v3/income-statement/{clean_symbol}?period=quarter&limit=4&apikey={FMP_API_KEY}"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            income_statements = response.json()
-            
-            if not income_statements or len(income_statements) == 0:
-                return jsonify({
-                    'revenue': [],
-                    'netIncome': [],
-                    'operatingIncome': [],
-                    'chartData': []
-                })
-            
-            # 데이터 정리 및 차트용 데이터 생성
-            chart_data = []
-            revenue_data = []
-            net_income_data = []
-            operating_income_data = []
-            
-            for statement in reversed(income_statements):  # 최신순으로 정렬
-                # 분기별 데이터 처리
-                year = statement.get('calendarYear', '')
-                period = statement.get('period', '')
-                quarter = statement.get('quarter', '')
-                revenue = statement.get('revenue', 0) or 0
-                net_income = statement.get('netIncome', 0) or 0
-                operating_income = statement.get('operatingIncome', 0) or 0
-                
-                # 분기 레이블 생성 (예: 2024 Q1)
-                if year and quarter:
-                    label = f"{year} Q{quarter}"
-                elif year and period:
-                    label = f"{year} {period}"
-                else:
-                    label = year if year else ''
-                
-                if label:
-                    chart_data.append({
-                        'year': label,
-                        'revenue': revenue,
-                        'netIncome': net_income,
-                        'operatingIncome': operating_income
-                    })
-                    revenue_data.append({'year': label, 'value': revenue})
-                    net_income_data.append({'year': label, 'value': net_income})
-                    operating_income_data.append({'year': label, 'value': operating_income})
-            
-            # 최신 데이터
-            latest = income_statements[0] if income_statements else {}
-            
-            # 통화 정보 가져오기
-            currency = get_reported_currency(clean_symbol)
-            
-            # 세그먼트 데이터 병렬로 가져오기 (선택적, 실패해도 무방)
-            segment_data = None
-            try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(fetch_segment_data, clean_symbol)
-                    try:
-                        segment_data = future.result(timeout=5)  # 타임아웃 5초로 증가
-                        if segment_data:
-                            print(f'[OK] 세그먼트 데이터 수집 성공: {clean_symbol} ({len(segment_data.get("segments", []))}개 세그먼트)')
-                        else:
-                            print(f'[WARN] 세그먼트 데이터 없음: {clean_symbol}')
-                    except Exception as e:
-                        print(f'[WARN] 세그먼트 데이터 조회 실패: {clean_symbol} - {str(e)}')
-            except Exception as e:
-                print(f'[WARN] 세그먼트 데이터 조회 오류: {clean_symbol} - {str(e)}')
-            
-            result = {
-                'revenue': revenue_data,
-                'netIncome': net_income_data,
-                'operatingIncome': operating_income_data,
-                'chartData': chart_data,
-                'latest': {
-                    'revenue': latest.get('revenue', 0) or 0,
-                    'netIncome': latest.get('netIncome', 0) or 0,
-                    'operatingIncome': latest.get('operatingIncome', 0) or 0,
-                    'year': latest.get('calendarYear', '')
-                },
-                'currency': currency
-            }
-            
-            # 세그먼트 데이터가 있으면 추가
-            if segment_data:
-                result['segments'] = segment_data['segments']
-                result['segmentDate'] = segment_data['date']
-                result['segmentCurrency'] = segment_data['currency']
-            
-            return jsonify(result)
-        except Exception as e:
-            print(f'FMP 재무제표 API 오류: {e}')
-            return jsonify({
-                'revenue': [],
-                'netIncome': [],
-                'operatingIncome': [],
-                'chartData': []
-            })
+        # ChromaDB에 없으면 빈 데이터 반환
+        print(f'[WARN] {clean_symbol} 재무 데이터를 찾을 수 없습니다.')
+        return jsonify({
+            'revenue': [],
+            'netIncome': [],
+            'operatingIncome': [],
+            'chartData': []
+        })
     except Exception as e:
         print(f'재무제표 API 오류: {e}')
         return jsonify({
@@ -1860,78 +1504,8 @@ def get_kr_stock_financials(symbol):
                 import traceback
                 traceback.print_exc()
         
-        # DART 실패 시 FMP API로 폴백 (대형주만 지원)
-        print(f'FMP API로 폴백 시도: {clean_symbol}')
-        try:
-            kr_symbol = f"{clean_symbol}.KS"
-            url = f"https://financialmodelingprep.com/api/v3/income-statement/{kr_symbol}?period=quarter&limit=4&apikey={FMP_API_KEY}"
-            print(f'FMP API 호출: {url[:80]}...')
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            income_statements = response.json()
-            print(f'FMP API 응답: {len(income_statements) if isinstance(income_statements, list) else "dict"}')
-            
-            if isinstance(income_statements, dict) and 'Error Message' in income_statements:
-                raise Exception("FMP API에서 데이터를 찾을 수 없습니다.")
-            
-            if not income_statements or len(income_statements) == 0:
-                return jsonify({
-                    'revenue': [],
-                    'netIncome': [],
-                    'operatingIncome': [],
-                    'chartData': []
-                })
-            
-            # FMP 데이터 파싱
-            chart_data = []
-            revenue_data = []
-            net_income_data = []
-            operating_income_data = []
-            
-            for statement in reversed(income_statements):
-                year = statement.get('calendarYear', '')
-                quarter = statement.get('quarter', '')
-                revenue = statement.get('revenue', 0) or 0
-                net_income = statement.get('netIncome', 0) or 0
-                operating_income = statement.get('operatingIncome', 0) or 0
-                
-                if year and quarter:
-                    label = f"{year} Q{quarter}"
-                else:
-                    label = year if year else ''
-                
-                if label:
-                    chart_data.append({
-                        'year': label,
-                        'revenue': revenue,
-                        'netIncome': net_income,
-                        'operatingIncome': operating_income
-                    })
-                    revenue_data.append({'year': label, 'value': revenue})
-                    net_income_data.append({'year': label, 'value': net_income})
-                    operating_income_data.append({'year': label, 'value': operating_income})
-            
-            latest = income_statements[0] if income_statements else {}
-            latest_year = latest.get('calendarYear', '')
-            latest_quarter = latest.get('quarter', '')
-            latest_label = f"{latest_year} Q{latest_quarter}" if latest_year and latest_quarter else latest_year
-            
-            return jsonify({
-                'revenue': revenue_data,
-                'netIncome': net_income_data,
-                'operatingIncome': operating_income_data,
-                'chartData': chart_data,
-                'latest': {
-                    'revenue': latest.get('revenue', 0) or 0,
-                    'netIncome': latest.get('netIncome', 0) or 0,
-                    'operatingIncome': latest.get('operatingIncome', 0) or 0,
-                    'year': latest_label
-                }
-            })
-        except Exception as e:
-            print(f'FMP 폴백 오류: {e}')
-        
-        # 모든 방법 실패
+        # DART 실패 시 빈 데이터 반환
+        print(f'[WARN] {clean_symbol} 재무 데이터를 찾을 수 없습니다.')
         return jsonify({
             'revenue': [],
             'netIncome': [],
