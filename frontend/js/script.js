@@ -16,6 +16,9 @@ const chartInstances = {};
 // DOM 요소 변수
 let chatMessages, userInput, sendButton, imageUploadInput, imageUploadButton;
 
+// 최근 비전 분석 결과 저장 (관련종목에서 활용)
+let lastVisionResult = null;
+
 // 간단한 응답 규칙
 const responses = {
     '안녕': '안녕하세요!',
@@ -37,10 +40,22 @@ const MARKET_ALIAS_MAP = {
     'kospi': 'KRX',
     '코스피': 'KRX',
     'kosdaq': 'KRX',
-    '코스닥': 'KRX'
+    '코스닥': 'KRX',
+    'xetra': 'XETRA',
+    '독일': 'XETRA',
+    'frankfurt': 'XETRA',
+    '프랑크푸르트': 'XETRA',
+    'hkex': 'HKEX',
+    '홍콩': 'HKEX',
+    'sse': 'SSE',
+    '상해': 'SSE',
+    'szse': 'SZSE',
+    '심천': 'SZSE',
+    'twse': 'TWSE',
+    '대만': 'TWSE'
 };
 
-const SUPPORTED_MARKETS = new Set(['NASDAQ', 'NYSE', 'KRX']);
+const SUPPORTED_MARKETS = new Set(['NASDAQ', 'NYSE', 'KRX', 'XETRA', 'HKEX', 'SSE', 'SZSE', 'TWSE']);
 
 // 이미지 업로드 처리
 async function handleImageFile(file) {
@@ -62,8 +77,9 @@ async function handleImageFile(file) {
             const renderCtx = addVisionPrimaryMessage(quickResult); // 핵심 필드 즉시 표시
 
             // 핵심 결과 기반으로 종목 자동 로드(차트/요약 카드 표시)
+            let stockCandidateQuick = null;
             try {
-                const stockCandidateQuick = getVisionStockCandidate(quickResult);
+                stockCandidateQuick = getVisionStockCandidate(quickResult);
                 if (stockCandidateQuick) {
                     const stockData = await fetchStockData(stockCandidateQuick.searchTicker);
                     if (stockData) {
@@ -74,15 +90,61 @@ async function handleImageFile(file) {
                 console.error('빠른 분석 기반 종목 자동 로드 오류:', e);
             }
 
+            // 비상장 회사인 경우 추가 분석 중 메시지 표시
+            let investableStockLoadingId = null;
+            const primary = quickResult?.primary;
+            const primaryMarket = primary?.company_market;
+            const isPrivate = !primaryMarket || 
+                              String(primaryMarket).toLowerCase() === '비상장' || 
+                              String(primaryMarket).toLowerCase() === 'nonlisted' ||
+                              String(primaryMarket).toLowerCase() === 'unlisted';
+            
+            if (!stockCandidateQuick && isPrivate) {
+                investableStockLoadingId = addLoadingMessage('직접투자 가능 종목 분석중...');
+            }
+
             // 2단계: 보강 정보를 백그라운드로 요청해서 UI 갱신
             requestVisionAnalysis(file, 'full')
-                .then(fullResult => {
+                .then(async fullResult => {
                     if (fullResult) {
+                        // 전역 변수에 비전 결과 저장 (관련종목에서 활용)
+                        lastVisionResult = fullResult;
+                        
                         updateVisionEnrichmentMessage(renderCtx.enrichmentContainerId, fullResult);
+                        
+                        // 빠른 모드에서 메인카드를 못 띄웠고, 지주회사 정보가 있으면 메인카드 띄우기
+                        if (!stockCandidateQuick && fullResult.holding_company) {
+                            try {
+                                const stockCandidateFull = getVisionStockCandidate(fullResult);
+                                if (stockCandidateFull && stockCandidateFull.source === 'holding_company') {
+                                    // 로딩 메시지 제거
+                                    if (investableStockLoadingId) {
+                                        removeMessage(investableStockLoadingId);
+                                        investableStockLoadingId = null;
+                                    }
+                                    
+                                    const stockData = await fetchStockData(stockCandidateFull.searchTicker);
+                                    if (stockData) {
+                                        addStockMessage(stockData);
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('지주회사 기반 종목 자동 로드 오류:', e);
+                            }
+                        }
+                        
+                        // 지주회사 정보도 없으면 로딩 메시지 제거
+                        if (investableStockLoadingId) {
+                            removeMessage(investableStockLoadingId);
+                        }
                     }
                 })
                 .catch(err => {
                     console.error('비동기 보강 로드 오류:', err);
+                    // 오류 발생 시 로딩 메시지 제거
+                    if (investableStockLoadingId) {
+                        removeMessage(investableStockLoadingId);
+                    }
                 });
         } else {
             addMessage('이미지 분석 결과를 가져오지 못했습니다.', 'bot');
@@ -452,14 +514,37 @@ function sanitizeTicker(value) {
 
 function getVisionStockCandidate(result) {
     const sections = [];
+    
+    const primary = result?.primary;
+    const primaryMarket = primary?.company_market;
+    const isPrivate = !primaryMarket || 
+                      String(primaryMarket).toLowerCase() === '비상장' || 
+                      String(primaryMarket).toLowerCase() === 'nonlisted' ||
+                      String(primaryMarket).toLowerCase() === 'unlisted';
+    
+    // 비상장이면서 지주회사 정보가 있으면 지주회사를 최우선으로
+    if (isPrivate && result?.holding_company) {
+        const hc = result.holding_company;
+        sections.push({
+            company_ticker: hc.holding_ticker,
+            company_market: hc.holding_market,
+            company: hc.holding_company,
+            source: 'holding_company'
+        });
+    }
+    
+    // 그 다음 primary
     if (result?.primary) {
         sections.push({ ...result.primary, source: 'primary' });
     }
+    
+    // fallback
     if (result?.fallback) {
         sections.push({ ...result.fallback, source: 'fallback' });
     }
-    // 지주회사 정보도 확인
-    if (result?.holding_company) {
+    
+    // 비상장이 아닌 경우(상장사)는 지주회사를 마지막에 추가
+    if (!isPrivate && result?.holding_company) {
         const hc = result.holding_company;
         sections.push({
             company_ticker: hc.holding_ticker,
@@ -474,7 +559,7 @@ function getVisionStockCandidate(result) {
         if (!market || !SUPPORTED_MARKETS.has(market)) {
             continue;
         }
-        const ticker = sanitizeTicker(section.company_ticker);
+        let ticker = sanitizeTicker(section.company_ticker);
         const company = (section.company || '').trim();
 
         let searchTicker = null;
@@ -486,9 +571,25 @@ function getVisionStockCandidate(result) {
                 searchTicker = company;
             }
         } else {
-            // US 등: 티커 우선, 없으면 회사명으로 시도
-            if (ticker && /^[A-Z]{1,6}$/.test(ticker)) {
+            // US, XETRA, HKEX 등: 티커 우선, 없으면 회사명으로 시도
+            if (ticker && /^[A-Z0-9]{1,6}$/.test(ticker)) {
+                // XETRA, HKEX 등 특정 거래소는 Yahoo Finance 형식으로 변환
+                if (market === 'XETRA') {
+                    searchTicker = ticker.includes('.DE') ? ticker : `${ticker}.DE`;
+                } else if (market === 'HKEX') {
+                    // 홍콩: 숫자 4자리 + .HK (예: 0700.HK)
+                    searchTicker = ticker.includes('.HK') ? ticker : `${ticker.padStart(4, '0')}.HK`;
+                } else if (market === 'SSE' || market === 'SZSE') {
+                    // 중국: SSE는 .SS, SZSE는 .SZ
+                    const suffix = market === 'SSE' ? '.SS' : '.SZ';
+                    searchTicker = ticker.includes(suffix) ? ticker : `${ticker}${suffix}`;
+                } else if (market === 'TWSE') {
+                    // 대만: .TW
+                    searchTicker = ticker.includes('.TW') ? ticker : `${ticker}.TW`;
+                } else {
+                    // NASDAQ, NYSE 등은 그대로 사용
                 searchTicker = ticker;
+                }
             } else if (company) {
                 searchTicker = company;
             }
@@ -1405,6 +1506,53 @@ function addFavoriteStockInfo(symbol, companyName) {
     // 임시 데이터 (나중에 API로 교체)
     const favoriteData = getFavoriteMockData(symbol, companyName);
     
+    // 피어그룹 HTML 생성
+    const hasPeerGroupData = Object.keys(favoriteData.peerGroup).length > 0;
+    
+    let peerGroupHtml = '';
+    if (!hasPeerGroupData) {
+        if (lastVisionResult?.related_public_companies && lastVisionResult.related_public_companies.length > 0) {
+            peerGroupHtml = `<div class="vision-enrichment-section">
+                <h5 style="margin-bottom: 12px;">🔎 제품 관련 상장사</h5>
+                <div class="related-companies-list">
+                    ${lastVisionResult.related_public_companies.map((comp, idx) => `
+                        <div class="peer-item">
+                            <div class="peer-info-row">
+                                <span class="peer-name">${idx + 1}. ${comp.company || '-'}</span>
+                                <span class="peer-ticker">${comp.ticker || '-'} (${comp.market || '-'})</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        } else {
+            peerGroupHtml = '<div class="no-data-message">해당 종목의 피어그룹 데이터가 준비되지 않았습니다.</div>';
+        }
+    } else {
+        peerGroupHtml = Object.entries(favoriteData.peerGroup).map(([companyName, categories]) => `
+            <div class="peer-company-group">
+                <div class="peer-company-header">
+                    <h5 class="peer-company-name">${companyName}</h5>
+                </div>
+                ${categories.map(categoryData => `
+                    <div class="peer-category-section">
+                        <div class="peer-category-title">${categoryData.category}</div>
+                        <div class="peer-competitors">
+                            ${categoryData.competitors.map(comp => `
+                                <div class="peer-item">
+                                    <div class="peer-info-row">
+                                        <span class="peer-name">${comp.name}</span>
+                                        <span class="peer-ticker">${comp.ticker} (${comp.market})</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `).join('');
+    }
+    
     contentDiv.innerHTML = `
         <div class="favorite-info">
             <div class="favorite-header-container">
@@ -1431,30 +1579,7 @@ function addFavoriteStockInfo(symbol, companyName) {
                 </div>
                 <p class="favorite-description">같은 산업군에 속한 주요 경쟁사들입니다.</p>
                 <div class="peer-group-list">
-                    ${Object.keys(favoriteData.peerGroup).length === 0 ? 
-                        '<div class="no-data-message">해당 종목의 피어그룹 데이터가 준비되지 않았습니다.</div>' :
-                        Object.entries(favoriteData.peerGroup).map(([companyName, categories]) => `
-                        <div class="peer-company-group">
-                            <div class="peer-company-header">
-                                <h5 class="peer-company-name">${companyName}</h5>
-                            </div>
-                            ${categories.map(categoryData => `
-                                <div class="peer-category-section">
-                                    <div class="peer-category-title">${categoryData.category}</div>
-                                    <div class="peer-competitors">
-                                        ${categoryData.competitors.map(comp => `
-                                            <div class="peer-item">
-                                                <div class="peer-info-row">
-                                                    <span class="peer-name">${comp.name}</span>
-                                                    <span class="peer-ticker">${comp.ticker} (${comp.market})</span>
-                                                </div>
-                                            </div>
-                                        `).join('')}
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    `).join('')}
+                    ${peerGroupHtml}
                 </div>
             </div>
             </div>
@@ -2002,25 +2127,25 @@ function addNewsMessage(companyName, symbol, newsList) {
     newsSection.className = 'news-section';
     newsSection.innerHTML = `
         <div class="news-header-container">
-            <h4 class="news-title">📰 ${companyName} 최신 뉴스</h4>
+        <h4 class="news-title">📰 ${companyName} 최신 뉴스</h4>
             <button class="news-collapse-btn" data-target="${newsBodyId}">접기</button>
         </div>
         <div id="${newsBodyId}" class="news-body">
-            <div class="news-list">
-                ${newsList.map((item) => `
-                    <div class="news-item">
-                        <div class="news-header">
-                            <span class="news-site">${item.site || ''}</span>
-                            <span class="news-date">${item.date || ''}</span>
-                        </div>
-                        <div class="news-content">
-                            <a href="${item.url}" target="_blank" class="news-link">
-                                <strong>${item.title || '제목 없음'}</strong>
-                            </a>
-                            ${item.summary ? `<p class="news-summary">${item.summary}</p>` : ''}
-                        </div>
+        <div class="news-list">
+            ${newsList.map((item) => `
+                <div class="news-item">
+                    <div class="news-header">
+                        <span class="news-site">${item.site || ''}</span>
+                        <span class="news-date">${item.date || ''}</span>
                     </div>
-                `).join('')}
+                    <div class="news-content">
+                        <a href="${item.url}" target="_blank" class="news-link">
+                            <strong>${item.title || '제목 없음'}</strong>
+                        </a>
+                        ${item.summary ? `<p class="news-summary">${item.summary}</p>` : ''}
+                    </div>
+                </div>
+            `).join('')}
             </div>
             <div style="margin-top:16px; text-align:right;">
                 <button class="scroll-to-main-btn" data-symbol="${symbol}">⬆️ 메인카드로 이동</button>
@@ -2222,8 +2347,8 @@ async function addStockMessage(stockData) {
     stockInfo.innerHTML = `
         <div class="stock-header">
             <div class="stock-header-left">
-                <h3>${stockData.name}</h3>
-                <span class="stock-symbol">${stockData.symbol}</span>
+            <h3>${stockData.name}</h3>
+            <span class="stock-symbol">${stockData.symbol}</span>
             </div>
             <button class="favorite-star-btn" data-symbol="${stockData.symbol}" data-name="${stockData.name}" title="관심 종목 추가">
                 <i data-lucide="star" class="star-icon"></i>
@@ -3176,11 +3301,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // 모달 배경 클릭 시 닫기
     if (imageSelectModal) {
-        imageSelectModal.addEventListener('click', (e) => {
-            if (e.target === imageSelectModal) {
-                imageSelectModal.style.display = 'none';
-            }
-        });
+    imageSelectModal.addEventListener('click', (e) => {
+        if (e.target === imageSelectModal) {
+            imageSelectModal.style.display = 'none';
+        }
+    });
     }
     
     // 카메라 버튼 (빈 버튼)
@@ -3489,7 +3614,7 @@ function renderEarningsCall(data, container) {
             <div class="earnings-section-card earnings-core">
                 <div class="earnings-section-header">
                     <span class="earnings-icon">📊</span>
-                    <h6 class="earnings-section-title">핵심 요약</h6>
+                <h6 class="earnings-section-title">핵심 요약</h6>
                 </div>
                 <ul class="earnings-list">
                     ${data.core_summary.map(item => `<li><span class="earnings-bullet">✓</span>${item}</li>`).join('')}
@@ -3532,7 +3657,7 @@ function renderEarningsCall(data, container) {
             <div class="earnings-section-card earnings-guidance">
                 <div class="earnings-section-header">
                     <span class="earnings-icon">🎯</span>
-                    <h6 class="earnings-section-title">가이던스</h6>
+                <h6 class="earnings-section-title">가이던스</h6>
                 </div>
                 <ul class="earnings-list">
                     ${data.guidance.map(item => `<li><span class="earnings-bullet">→</span>${item}</li>`).join('')}
@@ -3634,8 +3759,8 @@ function createIndexCard(index) {
         <div class="index-card-value">${index.value.toLocaleString()}</div>
         <div class="index-card-change ${changeClass}">
             ${changeSign}${change.toLocaleString()}(${changeSign}${changePercent.toFixed(2)}%)
-        </div>
-    `;
+            </div>
+        `;
     
     return card;
 }
@@ -4022,15 +4147,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // 카메라 버튼 (현재는 앨범과 동일하게 파일 선택)
+    // 카메라 버튼 - 카메라 모달 열기
     if (cameraButton) {
         cameraButton.addEventListener('click', () => {
             if (imageToggleMenu) {
                 imageToggleMenu.style.display = 'none';
             }
-            if (imageUploadInput) {
-                imageUploadInput.click();
-            }
+            openCameraModal();
         });
     }
     
@@ -4180,5 +4303,150 @@ document.addEventListener('DOMContentLoaded', () => {
             loadRankingStocks(type);
         });
     });
+    
+    // 카메라 모달 이벤트 리스너
+    const cameraCloseBtn = document.getElementById('cameraCloseBtn');
+    const cameraCaptureBtn = document.getElementById('cameraCaptureBtn');
+    
+    if (cameraCloseBtn) {
+        cameraCloseBtn.addEventListener('click', closeCameraModal);
+    }
+    
+    if (cameraCaptureBtn) {
+        cameraCaptureBtn.addEventListener('click', capturePhoto);
+    }
 });
+
+// 카메라 관련 변수
+let cameraStream = null;
+const cameraModal = document.getElementById('cameraModal');
+const cameraVideo = document.getElementById('cameraVideo');
+const cameraCanvas = document.getElementById('cameraCanvas');
+
+// 카메라 모달 열기
+async function openCameraModal() {
+    try {
+        // 카메라 권한 요청 및 스트림 가져오기
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: 'environment', // 후면 카메라 우선 (모바일)
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            }
+        });
+        
+        // 비디오 요소에 스트림 연결
+        if (cameraVideo) {
+            cameraVideo.srcObject = cameraStream;
+        }
+        
+        // 모달 표시
+        if (cameraModal) {
+            cameraModal.style.display = 'flex';
+            // Lucide 아이콘 다시 초기화
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        }
+        
+        // 랜딩 페이지에서 카메라 열면 채팅 페이지로 전환
+        const landingPage = document.getElementById('landingPage');
+        const chatPage = document.getElementById('chatPage');
+        if (landingPage && chatPage && landingPage.style.display !== 'none') {
+            landingPage.style.display = 'none';
+            chatPage.style.display = 'flex';
+        }
+    } catch (error) {
+        console.error('카메라 접근 오류:', error);
+        alert('카메라에 접근할 수 없습니다. 카메라 권한을 확인해주세요.');
+    }
+}
+
+// 카메라 모달 닫기
+function closeCameraModal() {
+    // 카메라 스트림 종료
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+    }
+    
+    // 비디오 소스 초기화
+    if (cameraVideo) {
+        cameraVideo.srcObject = null;
+    }
+    
+    // 모달 숨기기
+    if (cameraModal) {
+        cameraModal.style.display = 'none';
+    }
+}
+
+// 사진 촬영
+function capturePhoto() {
+    if (!cameraVideo || !cameraCanvas) {
+        console.error('카메라 요소를 찾을 수 없습니다.');
+        return;
+    }
+    
+    const context = cameraCanvas.getContext('2d');
+    
+    // 실제 비디오 크기
+    const videoWidth = cameraVideo.videoWidth;
+    const videoHeight = cameraVideo.videoHeight;
+    
+    // 화면에 표시되는 비디오 요소의 크기
+    const displayWidth = cameraVideo.clientWidth;
+    const displayHeight = cameraVideo.clientHeight;
+    
+    // 비디오와 디스플레이의 종횡비
+    const videoAspect = videoWidth / videoHeight;
+    const displayAspect = displayWidth / displayHeight;
+    
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceWidth = videoWidth;
+    let sourceHeight = videoHeight;
+    
+    // object-fit: cover 로직 - 화면에 보이는 영역만 계산
+    if (videoAspect > displayAspect) {
+        // 비디오가 더 넓음 - 좌우가 잘림
+        sourceWidth = videoHeight * displayAspect;
+        sourceX = (videoWidth - sourceWidth) / 2;
+    } else {
+        // 비디오가 더 높음 - 상하가 잘림
+        sourceHeight = videoWidth / displayAspect;
+        sourceY = (videoHeight - sourceHeight) / 2;
+    }
+    
+    // 캔버스 크기를 디스플레이 비율로 설정 (고해상도 유지)
+    const outputWidth = 1920;
+    const outputHeight = Math.round(outputWidth / displayAspect);
+    
+    cameraCanvas.width = outputWidth;
+    cameraCanvas.height = outputHeight;
+    
+    // 화면에 보이는 영역만 캔버스에 그리기
+    context.drawImage(
+        cameraVideo,
+        sourceX, sourceY, sourceWidth, sourceHeight,  // 소스 영역 (비디오에서 크롭)
+        0, 0, outputWidth, outputHeight                // 대상 영역 (캔버스 전체)
+    );
+    
+    // 캔버스를 Blob으로 변환
+    cameraCanvas.toBlob(async (blob) => {
+        if (blob) {
+            // Blob을 File 객체로 변환
+            const file = new File([blob], 'camera-photo.jpg', { type: 'image/jpeg' });
+            
+            // 카메라 모달 닫기
+            closeCameraModal();
+            
+            // 이미지 파일 처리
+            await handleImageFile(file);
+        } else {
+            console.error('사진 캡처 실패');
+            alert('사진을 촬영할 수 없습니다. 다시 시도해주세요.');
+        }
+    }, 'image/jpeg', 0.95); // 95% 품질로 JPEG 저장
+}
 

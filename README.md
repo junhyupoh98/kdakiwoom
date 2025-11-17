@@ -1,6 +1,15 @@
-# 주식 정보 챗봇
+# 📱 PicMe - 이미지 기반 주식 분석 챗봇
 
-스마트폰용 주식 정보 검색 챗봇입니다. 한국 주식과 해외 주식을 검색할 수 있습니다.
+사진 한 장으로 투자 종목을 찾는 AI 기반 주식 정보 검색 챗봇입니다.
+
+## ✨ 주요 기능
+
+- 📸 **이미지 분석**: 제품/브랜드 사진을 찍으면 자동으로 관련 상장 기업 찾기
+- 📊 **실시간 주가**: 한국/해외 주식 실시간 가격 및 차트
+- 📰 **뉴스 분석**: 최신 뉴스 및 Earnings Call 요약
+- 💼 **재무 분석**: 분기별 재무제표, 사업부문별 매출 분석
+- 🔗 **관련 종목**: 피어그룹, 밸류체인 분석
+- 🎥 **카메라 연동**: 웹캠/스마트폰 카메라로 직접 촬영
 
 ## 프로젝트 구조
 
@@ -97,20 +106,71 @@ npm run python
   - 네이버 뉴스 API (한국 주식)
   - FMP API (해외 주식)
 
-## 환경 변수 (선택사항)
+## 🔑 환경 설정 (필수!)
 
-Python 서버는 다음 환경 변수를 지원합니다:
+### 1. `.env` 파일 생성
 
-- `NAVER_CLIENT_ID`: 네이버 뉴스 API 클라이언트 ID
-- `NAVER_CLIENT_SECRET`: 네이버 뉴스 API 클라이언트 시크릿
-- `OPENAI_API_KEY`: OpenAI API 키 (뉴스 요약용, 현재는 사용 안 함)
+프로젝트 클론 후 **반드시** 환경 변수를 설정해야 합니다.
 
-API 키는 `backend/python/server.py` 파일에서 직접 설정할 수도 있습니다.
+```bash
+# 1. 예제 파일 복사
+cp backend/.env.example backend/.env
 
-## 주의사항
+# 2. backend/.env 파일을 열어서 실제 API 키로 변경
+```
 
-- Python 서버는 DART API 키가 필요합니다 (한국 주식 재무제표 조회용)
-- 캐시 파일은 `cache/` 디렉토리에 자동으로 생성됩니다
-- `.gitignore`에 캐시 파일이 포함되어 있어 Git에 커밋되지 않습니다
+### 2. Google Service Account 설정
+
+이미지 분석을 위해 Google Cloud Vision API 인증이 필요합니다.
+
+```bash
+# 1. backend/credentials/ 폴더 생성
+mkdir -p backend/credentials
+
+# 2. Google Cloud Console에서 다운로드한 service-account.json 파일을
+#    backend/credentials/ 폴더에 저장
+cp /path/to/your/service-account.json backend/credentials/
+
+# 3. backend/.env 파일에서 경로 확인
+# GOOGLE_APPLICATION_CREDENTIALS=./backend/credentials/service-account.json
+```
+
+### 3. 필수 API 키 목록
+
+| API | 용도 | 필수 여부 | 발급 방법 |
+|-----|------|-----------|-----------|
+| **Google Cloud Vision** | 이미지 분석 | ✅ 필수 | [Google Cloud Console](https://console.cloud.google.com) |
+| **Gemini API** | AI 분석 | ✅ 필수 | [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| **ChromaDB** | 재무 데이터 | ✅ 필수 | 팀에서 공유 |
+| OpenAI API | 텍스트 분석 | ⚠️ 선택 | [OpenAI Platform](https://platform.openai.com) |
+| FMP API | 해외 주식 재무 | ⚠️ 선택 | [FMP](https://site.financialmodelingprep.com) |
+| DART API | 한국 주식 재무 | ⚠️ 선택 | [DART](https://opendart.fss.or.kr) |
+| Naver News API | 한국 뉴스 | ⚠️ 선택 | [Naver Developers](https://developers.naver.com) |
+
+### 4. 환경 변수 예시
+
+```bash
+# backend/.env 파일 내용 예시
+GOOGLE_CLOUD_PROJECT_ID=your-project-id
+GEMINI_API_KEY=AIzaSy...
+CHROMADB_API_KEY=ck-...
+# ... 기타 설정은 .env.example 참고
+```
+
+## ⚠️ 주의사항
+
+### 보안
+- ❌ **절대로** `.env` 파일이나 `service-account.json`을 Git에 커밋하지 마세요!
+- ✅ `.gitignore`에 이미 포함되어 있어 자동으로 제외됩니다
+- ✅ API 키는 절대 코드에 하드코딩하지 마세요
+
+### 파일 구조
+```
+backend/
+├── .env                          # ❌ Git에 커밋 안 됨 (민감 정보)
+├── .env.example                  # ✅ Git에 포함 (예제)
+└── credentials/
+    └── service-account.json      # ❌ Git에 커밋 안 됨 (민감 정보)
+```
 
 

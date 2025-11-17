@@ -1,6 +1,7 @@
 # 환경 변수 및 시크릿
 .env
 backend/.env
+!backend/.env.example
 *.json
 !package.json
 !package-lock.json
