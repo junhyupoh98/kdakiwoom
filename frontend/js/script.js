@@ -1037,8 +1037,45 @@ function renderSegmentChart(canvasId, segments, currency) {
             
             // 총 매출액 계산
             const totalRevenue = chartSegments.reduce((sum, s) => sum + s.revenue, 0);
-            const currencySymbol = currency === 'KRW' ? '₩' : (currency === 'USD' ? '$' : currency);
             const isMobile = window.innerWidth <= 768;
+            
+            // 한국식/글로벌 단위 변환
+            let revenueText;
+            if (currency === 'KRW') {
+                // 한국 원화: FMP API는 억원 단위로 반환 (115.59 = 115.59억원)
+                const revenueInBillionKRW = totalRevenue; // 이미 억원 단위
+                const revenueInTrillionKRW = revenueInBillionKRW / 10000; // 조원으로 변환 (1조 = 10,000억)
+                
+                if (revenueInTrillionKRW >= 1) {
+                    // 1조원 이상
+                    revenueText = `${revenueInTrillionKRW.toFixed(1)}조원`;
+                } else if (revenueInBillionKRW >= 1) {
+                    // 1억원 이상
+                    revenueText = `${Math.round(revenueInBillionKRW)}억원`;
+                } else {
+                    // 1억원 미만
+                    revenueText = `${(revenueInBillionKRW * 100).toFixed(0)}백만원`;
+                }
+            } else {
+                // 달러 등: 한국식 단위로 표시
+                // FMP API는 백만 달러 단위로 반환 (예: 394328 = 394,328M = $394.3B = $3,943억 달러)
+                const currencySymbol = currency === 'USD' ? '$' : currency;
+                const revenueInBillionUSD = totalRevenue / 1000; // Billion 달러 단위
+                const revenueInHundredMillionUSD = revenueInBillionUSD * 10; // 억 달러 단위 (1B = 10억)
+                
+                if (revenueInHundredMillionUSD >= 10000) {
+                    // 1조 달러 이상 (10,000억 달러)
+                    revenueText = `${currencySymbol}${(revenueInHundredMillionUSD / 10000).toFixed(1)}조`;
+                } else if (revenueInHundredMillionUSD >= 1) {
+                    // 1억 달러 이상
+                    const formatted = Math.round(revenueInHundredMillionUSD).toLocaleString('ko-KR');
+                    revenueText = `${currencySymbol}${formatted}억`;
+                } else {
+                    // 1억 달러 미만
+                    const formatted = Math.round(totalRevenue).toLocaleString('ko-KR');
+                    revenueText = `${currencySymbol}${formatted}M`;
+                }
+            }
             
             // 중앙 타이틀
             ctx.font = `bold ${isMobile ? 14 : 14}px Pretendard, -apple-system, sans-serif`;
@@ -1050,7 +1087,6 @@ function renderSegmentChart(canvasId, segments, currency) {
             // 중앙 금액
             ctx.font = `bold ${isMobile ? 18 : 18}px Pretendard, -apple-system, sans-serif`;
             ctx.fillStyle = '#1f2937';
-            const revenueText = `${currencySymbol}${(totalRevenue / 1000).toFixed(1)}B`;
             ctx.fillText(revenueText, centerX, centerY + 3);
             
             // 중앙 부문 수

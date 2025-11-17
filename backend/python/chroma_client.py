@@ -886,27 +886,72 @@ def fetch_kr_financials_from_chroma(symbol: str) -> Optional[Dict[str, Any]]:
     segments = payload.get("segments") or {}
     if isinstance(segments, dict) and segments:
         segment_rows = []
-        total_value = 0.0
-        converted_segments: Dict[str, float] = {}
-        for name, value in segments.items():
-            try:
-                amount = float(str(value).replace(",", ""))
-            except ValueError:
-                continue
-            converted_segments[name] = amount
-            total_value += amount
+        
+        # 세그먼트 데이터가 퍼센트인지 절대값인지 확인
+        # 합계가 100에 가까우면 퍼센트로 간주 (반올림으로 100 초과 가능)
+        total_sum = sum(float(str(v).replace(",", "")) for v in segments.values() if v)
+        is_percentage = 80 <= total_sum <= 150  # 80~150 사이면 퍼센트로 간주
+        
+        print(f"[DEBUG] KR Segments raw data: {segments}")
+        print(f"[DEBUG] KR Segments total_sum: {total_sum}, is_percentage: {is_percentage}")
+        print(f"[DEBUG] KR latest_entry: {latest_entry}")
+        
+        if is_percentage:
+            # 퍼센트 데이터: 최신 분기 매출액 기준으로 실제 매출액 계산
+            latest_revenue_won = latest_entry.get("revenue", 0.0)  # 이미 원 단위
+            latest_revenue_billion = latest_revenue_won / 100_000_000.0  # 억원 단위로 변환
+            
+            print(f"[DEBUG] KR Segments: percentage mode")
+            print(f"[DEBUG] KR latest_revenue_won: {latest_revenue_won}")
+            print(f"[DEBUG] KR latest_revenue_billion: {latest_revenue_billion:.2f}억원")
+            
+            # 퍼센트 정규화: 합계가 100%가 되도록 조정 (반올림 오차 보정)
+            normalization_factor = 100.0 / total_sum if total_sum > 0 else 1.0
+            print(f"[DEBUG] KR Segments normalization_factor: {normalization_factor}")
+            
+            for name, pct_value in segments.items():
+                try:
+                    raw_percentage = float(str(pct_value).replace(",", ""))
+                except ValueError:
+                    continue
+                
+                # 정규화된 퍼센트 사용
+                normalized_percentage = raw_percentage * normalization_factor
+                
+                # 실제 매출액 계산 (억원)
+                segment_revenue_billion = latest_revenue_billion * (normalized_percentage / 100.0)
+                segment_revenue_won = segment_revenue_billion * 100_000_000.0  # 원 단위로 변환
+                
+                segment_rows.append(
+                    {
+                        "segment": name,
+                        "revenue": segment_revenue_billion,  # 억원 단위로 반환 (프론트엔드에서 그대로 사용)
+                        "percentage": normalized_percentage,  # 정규화된 퍼센트
+                    }
+                )
+        else:
+            # 절대값 데이터: 기존 로직 유지
+            total_value = 0.0
+            converted_segments: Dict[str, float] = {}
+            for name, value in segments.items():
+                try:
+                    amount = float(str(value).replace(",", ""))
+                except ValueError:
+                    continue
+                converted_segments[name] = amount
+                total_value += amount
 
-        for name, amount in converted_segments.items():
-            segment_rows.append(
-                {
-                    "segment": name,
-                    "revenue": amount,
-                    "percentage": (amount / total_value * 100.0) if total_value else 0.0,
-                }
-            )
+            for name, amount in converted_segments.items():
+                segment_rows.append(
+                    {
+                        "segment": name,
+                        "revenue": amount,
+                        "percentage": (amount / total_value * 100.0) if total_value else 0.0,
+                    }
+                )
 
         if segment_rows:
-            segment_rows.sort(key=lambda item: item["revenue"], reverse=True)
+            segment_rows.sort(key=lambda item: item["percentage"], reverse=True)
             response["segments"] = segment_rows
             response["segmentCurrency"] = "KRW"
             if as_of:

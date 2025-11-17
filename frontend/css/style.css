@@ -2276,7 +2276,7 @@ body {
     gap: 10px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding-bottom: 8px;
+    padding-bottom: 4px;
     margin-bottom: 0;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none; /* Firefox */
@@ -2620,11 +2620,19 @@ body {
         margin: 0 auto;
     }
     
-    .landing-search-bar {
-        max-width: 460px;
+    .landing-search-hero {
+        max-width: 468px;
         left: 50%;
         right: auto;
         transform: translateX(-50%);
+    }
+    
+    .landing-search-hero:hover {
+        transform: translateX(-50%) translateY(-2px);
+    }
+    
+    .landing-search-hero:active {
+        transform: translateX(-50%) translateY(0);
     }
 }
 
@@ -2736,31 +2744,58 @@ body {
    증권사 앱 스타일 랜딩 페이지
    ============================================ */
 
-/* 상단 검색바 */
-.landing-search-bar {
+/* 상단 검색 히어로 섹션 */
+.landing-search-hero {
     position: absolute;
     top: 50px;
     left: 16px;
     right: 16px;
-    height: 46px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 14px;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1.5px solid rgba(139, 92, 246, 0.2);
-    border-radius: 24px;
-    box-shadow: 0 2px 12px rgba(139, 92, 246, 0.15);
+    padding: 28px 20px 24px;
+    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+    border-radius: 20px;
+    box-shadow: 0 8px 32px rgba(124, 58, 237, 0.3);
+    z-index: 10;
     cursor: pointer;
     transition: all 0.3s ease;
-    z-index: 10;
+    margin-bottom: 20px;
+}
+
+.landing-search-hero:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(124, 58, 237, 0.4);
+}
+
+.landing-search-hero:active {
+    transform: translateY(0);
+}
+
+.search-hero-title {
+    margin: 0 0 18px 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.5;
+    text-align: center;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 상단 검색바 */
+.landing-search-bar {
+    position: relative;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    background: rgba(255, 255, 255, 1);
+    border: none;
+    border-radius: 26px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
 }
 
 .landing-search-bar:hover {
-    border-color: rgba(139, 92, 246, 0.4);
-    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.25);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
     transform: translateY(-1px);
 }
 
@@ -2772,27 +2807,28 @@ body {
     flex: 1;
     font-size: 15px;
     font-weight: 500;
-    color: #9ca3af;
+    color: #6b7280;
 }
 
 .landing-search-bar i {
     color: #8b5cf6;
+    flex-shrink: 0;
 }
 
 /* 상단 지수 섹션 */
 .landing-top-section {
-    margin-top: 110px;
-    padding: 16px 16px 20px;
+    margin-top: 210px;
+    padding: 20px 16px 20px;
     background: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(10px) saturate(180%);
     -webkit-backdrop-filter: blur(10px) saturate(180%);
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 .index-tabs-header {
     display: flex;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
 }
 
 .index-tab-main {
@@ -2877,7 +2913,7 @@ body {
 
 /* 공통 섹션 스타일 */
 .landing-section {
-    padding: 24px 20px;
+    padding: 20px 20px;
     margin-bottom: 12px;
     background: rgba(255, 255, 255, 0.7);
     backdrop-filter: blur(10px) saturate(180%);
@@ -3246,11 +3282,21 @@ body {
 
 /* 모바일 최적화 */
 @media (max-width: 500px) {
+    .landing-search-hero {
+        top: 45px;
+        left: 12px;
+        right: 12px;
+        padding: 24px 16px 20px;
+        margin-bottom: 16px;
+    }
+    
+    .search-hero-title {
+        font-size: 18px;
+        margin-bottom: 14px;
+    }
+    
     .landing-search-bar {
-        top: 50px;
-        left: 16px;
-        right: 16px;
-        height: 44px;
+        height: 50px;
     }
     
     .landing-search-bar .search-placeholder {
@@ -3258,12 +3304,12 @@ body {
     }
     
     .landing-top-section {
-        margin-top: 105px;
-        padding: 12px 16px 16px;
+        margin-top: 200px;
+        padding: 16px 16px 16px;
     }
     
     .landing-section {
-        padding: 20px 16px;
+        padding: 18px 16px;
     }
     
     .index-card {
