@@ -117,7 +117,7 @@ HOLDING_MAP = {
     },
 }
 
-_ALLOWED_MARKETS = {"KRX", "KOSDAQ", "KOSPI", "NASDAQ", "NYSE", "TSE"}
+_ALLOWED_MARKETS = {"KRX", "KOSDAQ", "KOSPI", "NASDAQ", "NYSE", "TSE", "HKEX", "SSE", "SZSE", "TWSE"}
 _HOLDING_CACHE: Dict[str, Dict[str, Any]] = {}
 _HOLDING_CACHE_MAX = 256
 
@@ -222,6 +222,17 @@ def _normalize_exchange_name(name: Optional[str]) -> Optional[str]:
     # 한국 표기 정규화
     if n in {"KOSPI PRIME", "KOSPIKOSPI"}:
         return "KOSPI"
+    # 홍콩 거래소
+    if n in {"HKEX", "SEHK", "HONG KONG", "HONG KONG EXCHANGE"}:
+        return "HKEX"
+    # 중국 본토 거래소
+    if n in {"SSE", "SHANGHAI", "SHSE", "SHANGHAI STOCK EXCHANGE"}:
+        return "SSE"
+    if n in {"SZSE", "SHENZHEN", "SHE", "SHENZHEN STOCK EXCHANGE"}:
+        return "SZSE"
+    # 대만 거래소
+    if n in {"TWSE", "TPE", "TAIWAN", "TAIWAN STOCK EXCHANGE"}:
+        return "TWSE"
     return n
 
 
@@ -722,19 +733,13 @@ def analyze_product_from_image(image_bytes: bytes, *, enrich: bool = True) -> Di
     client = _get_vision_client()
     image = vision_types.Image(content=image_bytes_proc)
 
-    # 빠른 모드(enrich=False)에서는 가벼운 기능만 사용하여 응답 단축
-    if not enrich:
-        features = [
-            {"type_": vision_types.Feature.Type.LABEL_DETECTION},
-            {"type_": vision_types.Feature.Type.OBJECT_LOCALIZATION},
-        ]
-    else:
-        features = [
-            {"type_": vision_types.Feature.Type.LABEL_DETECTION},
-            {"type_": vision_types.Feature.Type.TEXT_DETECTION},
-            {"type_": vision_types.Feature.Type.LOGO_DETECTION},
-            {"type_": vision_types.Feature.Type.OBJECT_LOCALIZATION},
-        ]
+    # 모드와 무관하게 항상 전체 Vision 기능 사용
+    features = [
+        {"type_": vision_types.Feature.Type.LABEL_DETECTION},
+        {"type_": vision_types.Feature.Type.TEXT_DETECTION},
+        {"type_": vision_types.Feature.Type.LOGO_DETECTION},
+        {"type_": vision_types.Feature.Type.OBJECT_LOCALIZATION},
+    ]
 
     vision_response = client.annotate_image({"image": image, "features": features}, timeout=6.0)
     summary = _summarize_vision_response(vision_response)
@@ -765,10 +770,20 @@ def analyze_product_from_image(image_bytes: bytes, *, enrich: bool = True) -> Di
         )
 
     fallback_result = None
+    fallback_data = None
     used_fallback = False
 
-    if (primary_error or not primary_data) and enrich:
-        # 빠른 모드에서는 이미지 직접분석 폴백을 생략하여 응답 시간 단축
+    # 기본 분석 실패이거나 핵심 필드가 부족하면 이미지 기반 Gemini 폴백 수행
+    def _missing_core_fields(d: Optional[Dict]) -> bool:
+        if not d:
+            return True
+        # 핵심: 브랜드/회사 중 하나 + 거래소/티커 중 하나 이상
+        has_brand_or_company = bool((d.get("brand") or d.get("company")))
+        has_exchange_and_ticker = bool(d.get("company_market")) and bool(d.get("company_ticker"))
+        return not (has_brand_or_company and has_exchange_and_ticker)
+
+    need_fallback = bool(primary_error or not primary_data or _missing_core_fields(primary_data))
+    if need_fallback:
         fallback_data, fallback_model, fallback_error = _call_gemini_with_image(image_bytes_proc, api_key=api_key, selected_model=selected_model)
         fallback_result = {
             "model": fallback_model,
@@ -789,7 +804,13 @@ def analyze_product_from_image(image_bytes: bytes, *, enrich: bool = True) -> Di
                     "company_ticker": fallback_data.get("company_ticker"),
                 }
             )
-        used_fallback = bool(fallback_data and not primary_data)
+        # used_fallback은 폴백이 기여했는지로 판단 (필드 보강 포함)
+        if fallback_data:
+            if (not primary_data) or any(
+                (not primary_result.get(k)) and (fallback_result.get(k))
+                for k in ("object", "brand", "company", "company_market", "company_ticker")
+            ):
+                used_fallback = True
 
     # 기본 결과 구성
     final_result = {
@@ -801,8 +822,21 @@ def analyze_product_from_image(image_bytes: bytes, *, enrich: bool = True) -> Di
 
     # 보강 정보는 느리므로, 요청 플래그(enrich)에 따라 비활성화 가능
     if enrich:
-        # primary 또는 fallback 중 성공한 결과 사용
-        base_data = primary_data if primary_data else fallback_data
+        # enrichment용 기준 데이터 선택:
+        # - used_fallback이 True이거나
+        # - primary가 핵심 필드 부족하고 fallback은 충분한 경우 → fallback 우선
+        # - 그 외에는 primary 우선, 없으면 fallback
+        def _enrich_pick(primary: Optional[Dict], fallback: Optional[Dict]) -> Optional[Dict]:
+            prefer_fallback = False
+            if used_fallback:
+                prefer_fallback = True
+            elif (primary and _missing_core_fields(primary)) and (fallback and not _missing_core_fields(fallback)):
+                prefer_fallback = True
+            elif not primary and fallback:
+                prefer_fallback = True
+            return fallback if prefer_fallback else primary
+
+        base_data = _enrich_pick(primary_data, fallback_data)
         if base_data:
             # 1) 지주회사 정보 보강
             try:
